@@ -6,6 +6,7 @@ service GeoService {
   rpc SearchPlotsByArea(AreaSearchRequest) returns (AreaSearchResponse);
   rpc GetDistances(DistanceRequest) returns (DistanceResponse);
   rpc CheckProtectedZones(ZoneRequest) returns (ZoneResponse);
+  rpc AnalyzeLandUseRestrictions(LandUseRestrictionRequest) returns (LandUseRestrictionResponse);
 }
 
 message LocationRequest {
@@ -68,4 +69,108 @@ message ZoneResponse {
   repeated string zone_types = 1;
   bool is_restricted = 2;
   string details_json = 3;
+}
+
+message RestrictionLayer {
+  // Normalized by data-collector. Geo-service should not depend on source map layer ids.
+  string id = 1;
+  string layer_type = 2;
+  string name = 3;
+  string source = 4;
+  string geometry_geojson = 5;
+  repeated string restrictions = 6;
+  repeated string normative_basis = 7;
+  string properties_json = 8;
+}
+
+message LandUseLayer {
+  string id = 1;
+  string land_use_type = 2; // arable | pasture | hayfield | fallow | perennial_planting | ...
+  string label = 3;
+  string geometry_geojson = 4;
+  string source = 5;
+  double confidence = 6;
+  string properties_json = 7;
+}
+
+message RealEstateObjectLayer {
+  string cadastral_number = 1;
+  string object_type = 2; // building | structure | unfinished_construction | ...
+  string name = 3;
+  double area_sqm = 4;
+  string geometry_geojson = 5;
+  string properties_json = 6;
+}
+
+message LandUseRestrictionRequest {
+  string cadastral_number = 1;
+  string scenario = 2; // agriculture | rent | construction
+  string parcel_geometry_geojson = 3;
+  double parcel_area_ha = 4;
+  repeated RestrictionLayer restriction_layers = 5;
+  repeated LandUseLayer land_use_layers = 6;
+  repeated RealEstateObjectLayer real_estate_objects = 7;
+  string vision_interpretation_json = 8;
+}
+
+message RestrictionLayerImpact {
+  string id = 1;
+  string layer_type = 2;
+  string label = 3;
+  string group = 4;
+  string name = 5;
+  string severity = 6;
+  string area_loss_mode = 7;
+  bool show_in_report = 8;
+  double intersection_ha = 9;
+  double counted_in_loss_ha = 10;
+  double overlap_not_double_counted_ha = 11;
+  repeated string restrictions = 12;
+  repeated string normative_basis = 13;
+  string source = 14;
+  string properties_json = 15;
+}
+
+message LandUseCompositionItem {
+  string land_use_type = 1;
+  string label = 2;
+  double area_ha = 3;
+  double share_percent = 4;
+  string source = 5;
+  double confidence = 6;
+}
+
+message ChildRealEstateObject {
+  string cadastral_number = 1;
+  string object_type = 2;
+  string name = 3;
+  double area_sqm = 4;
+  double intersection_ha = 5;
+  bool inside_parcel = 6;
+  string properties_json = 7;
+}
+
+message MapLayerOutput {
+  string id = 1;
+  string layer_type = 2;
+  string label = 3;
+  string geojson = 4;
+  string style_json = 5;
+  string properties_json = 6;
+}
+
+message LandUseRestrictionResponse {
+  string cadastral_number = 1;
+  string scenario = 2;
+  double parcel_area_ha = 3;
+  double restricted_area_ha = 4;
+  double usable_area_ha = 5;
+  double loss_percent = 6;
+  repeated RestrictionLayerImpact layers = 7;
+  repeated LandUseCompositionItem land_use_composition = 8;
+  repeated ChildRealEstateObject child_real_estate_objects = 9;
+  repeated MapLayerOutput map_layers = 10;
+  repeated string warnings = 11;
+  repeated string assumptions = 12;
+  string result_json = 13;
 }

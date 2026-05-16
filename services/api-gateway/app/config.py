@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     check_grpc: str = "check-service:50052"
     search_grpc: str = "search-service:50053"
     document_grpc: str = "document-service:50054"
+    data_collector_grpc: str = "data-collector:50056"
+    cadastral_lookup_timeout: float = 180.0
 
     allowed_origins: list[str] = ["http://localhost:3000"]
     rate_limit_per_minute: int = 60

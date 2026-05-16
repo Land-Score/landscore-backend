@@ -13,7 +13,7 @@ import random
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
@@ -334,16 +334,24 @@ class RealRosreestrClient:
         self.base_url = (base_url or settings.rosreestr_api_url).rstrip("/")
         self.timeout = timeout or settings.rosreestr_timeout
         self.verify_ssl = settings.rosreestr_verify_ssl if verify_ssl is None else verify_ssl
+        if settings.nspd_insecure_tls:
+            self.verify_ssl = False
+        self.original_host = urlsplit(self.base_url).netloc
+        self.request_base_url = _base_url_with_resolved_ip(self.base_url, settings.nspd_resolve_ip)
         self.headers = {
-            "Accept": "application/json",
+            "Accept": "application/json,*/*",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
             "Content-Type": "application/json",
-            "Referer": "https://nspd.gov.ru/map?thematic=PKK",
+            "Referer": "https://nspd.gov.ru/map?thematic=PKK&baseLayerId=235&theme_id=1",
             "User-Agent": settings.rosreestr_user_agent,
+            "X-Public-User": "true",
         }
+        if settings.nspd_resolve_ip:
+            self.headers["Host"] = self.original_host
 
     async def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
-            base_url=self.base_url,
+            base_url=self.request_base_url,
             headers=self.headers,
             timeout=self.timeout,
             verify=self.verify_ssl,
@@ -353,11 +361,14 @@ class RealRosreestrClient:
     async def get_plot(self, cadastral_number: str) -> PlotData:
         query = quote(cadastral_number.strip(), safe="")
         async with await self._client() as client:
-            response = await client.get(
-                f"/geoportal/v2/search/geoportal?thematicSearchId=1&query={query}&CRS=EPSG:4326"
+            payload = await _first_successful_json(
+                client,
+                (
+                    f"/geoportal/v2/search/geoportal?thematicSearchId=1&query={query}&CRS=EPSG:3857",
+                    f"/geoportal/v2/search/geoportal?query={query}&CRS=EPSG:3857",
+                    f"/geoportal/v1/search/geoportal?thematicSearchId=1&query={query}&CRS=EPSG:3857",
+                ),
             )
-            response.raise_for_status()
-            payload = response.json()
 
         features = payload.get("data", {}).get("features", [])
         if not features:
@@ -415,6 +426,27 @@ def _extract_features(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 features.append(item)
         return features
     return []
+
+
+def _base_url_with_resolved_ip(base_url: str, resolve_ip: str) -> str:
+    if not resolve_ip:
+        return base_url
+    parts = urlsplit(base_url)
+    return urlunsplit((parts.scheme, resolve_ip, parts.path, parts.query, parts.fragment))
+
+
+async def _first_successful_json(client: httpx.AsyncClient, paths: tuple[str, ...]) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for path in paths:
+        try:
+            response = await client.get(path)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    return {}
 
 
 def get_client(mode: str | None = None) -> MockRosreestrClient | RealRosreestrClient:

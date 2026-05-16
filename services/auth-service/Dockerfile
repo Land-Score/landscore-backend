@@ -13,7 +13,7 @@ COPY services/auth-service/start.sh start.sh
 
 COPY proto/ proto/
 COPY scripts/gen_protos.py gen_protos.py
-RUN python gen_protos.py proto app/proto_gen proto/auth.proto && chmod +x start.sh
+RUN python gen_protos.py proto app/proto_gen proto/auth.proto && sed -i 's/\r$//' start.sh && chmod +x start.sh
 
 EXPOSE 50051
-CMD ["./start.sh"]
+CMD ["bash", "start.sh"]

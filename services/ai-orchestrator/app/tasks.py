@@ -27,6 +27,13 @@ def run_check_task(self, payload: dict):
             lng=payload.get("lng", 0.0),
         ),
     )
+    for optional_key in (
+        "parcel_geometry_geojson",
+        "raw_features_by_layer_json",
+        "vision_interpretation_json",
+    ):
+        if optional_key in payload:
+            ctx.set(optional_key, payload[optional_key])
 
     async def _run():
         pipeline = build_check_pipeline()

@@ -17,6 +17,8 @@ services:
         condition: service_healthy
       document-service:
         condition: service_healthy
+      data-collector:
+        condition: service_healthy
     restart: unless-stopped
     networks: [landscore]
     healthcheck:

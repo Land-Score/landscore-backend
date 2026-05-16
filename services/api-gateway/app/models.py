@@ -1,4 +1,6 @@
 """Pydantic request/response models for all API Gateway endpoints."""
+from typing import Any
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -126,6 +128,27 @@ class CheckReportResponse(BaseModel):
 class ListChecksResponse(BaseModel):
     checks: list[CheckItemResponse]
     total: int
+
+
+class CadastralLookupRequest(BaseModel):
+    cadastral_number: str = Field(
+        min_length=5,
+        max_length=50,
+        description="Кадастровый номер участка",
+        examples=["26:11:101101:53"],
+    )
+
+
+class CadastralLookupResponse(BaseModel):
+    success: bool
+    cadastral_number: str
+    source: str = ""
+    nspd: dict[str, Any] = Field(default_factory=dict)
+    soil: dict[str, Any] = Field(default_factory=dict)
+    infrastructure: dict[str, Any] = Field(default_factory=dict)
+    market_liquidity: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    raw: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── Searches ─────────────────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ from app.clients import setup_clients, close_clients
 from app.config import settings
 from app.middleware.auth import AuthMiddleware
 from app.models import HealthResponse, ServiceHealthItem
-from app.routers import auth, checks, searches, documents
+from app.routers import auth, cadastral, checks, searches, documents
 
 log = structlog.get_logger()
 
@@ -99,6 +99,7 @@ app.add_middleware(AuthMiddleware)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth.router,      prefix="/api/auth",      tags=["Аутентификация"])
+app.include_router(cadastral.router, prefix="/api/cadastral", tags=["Кадастровые данные"])
 app.include_router(checks.router,    prefix="/api/checks",    tags=["Проверка участка"])
 app.include_router(searches.router,  prefix="/api/searches",  tags=["Поиск участка"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Документы"])
@@ -119,6 +120,7 @@ async def health_check() -> HealthResponse:
         ("check-service",    settings.check_grpc),
         ("search-service",   settings.search_grpc),
         ("document-service", settings.document_grpc),
+        ("data-collector",   settings.data_collector_grpc),
     ]
 
     async def probe(name: str, address: str) -> ServiceHealthItem:
@@ -164,6 +166,7 @@ _PUBLIC_PATHS = {
     "/api/auth/register",
     "/api/auth/login",
     "/api/auth/refresh",
+    "/api/cadastral/lookup",
 }
 
 

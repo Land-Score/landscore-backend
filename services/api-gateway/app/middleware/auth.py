@@ -12,6 +12,7 @@ _PUBLIC = {
     "/api/auth/register",
     "/api/auth/login",
     "/api/auth/refresh",
+    "/api/cadastral/lookup",
 }
 
 # Prefixes that are always public (Swagger static assets)

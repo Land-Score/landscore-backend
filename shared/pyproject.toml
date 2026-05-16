@@ -1,0 +1,18 @@
+[project]
+name = "landscore-shared"
+version = "0.1.0"
+description = "Shared utilities for LandScore AI services"
+requires-python = ">=3.12"
+dependencies = [
+    "grpcio>=1.67",
+    "grpcio-tools>=1.67",
+    "pydantic>=2.9",
+    "structlog>=24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["landscore_shared"]

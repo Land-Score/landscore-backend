@@ -1,0 +1,65 @@
+syntax = "proto3";
+package market;
+
+service MarketService {
+  rpc GetMarketAnalysis(MarketRequest) returns (MarketAnalysis);
+  rpc GetComparables(ComparablesRequest) returns (ComparablesResponse);
+  rpc GetPriceStats(PriceStatsRequest) returns (PriceStatsResponse);
+}
+
+message MarketRequest {
+  string region = 1;
+  string category = 2;
+  string allowed_use = 3;
+  double area = 4;
+  double lat = 5;
+  double lng = 6;
+  double asking_price = 7;
+}
+
+message MarketAnalysis {
+  double median_price_per_sqm = 1;
+  double avg_price_per_sqm = 2;
+  int32 comparables_count = 3;
+  string price_assessment = 4;
+  double price_deviation_pct = 5;
+  string market_activity = 6;
+  string trend = 7;
+  string llm_commentary = 8;
+}
+
+message ComparablesRequest {
+  string region = 1;
+  string category = 2;
+  double area_min = 3;
+  double area_max = 4;
+  int32 limit = 5;
+}
+
+message ComparablesResponse {
+  repeated Comparable comparables = 1;
+}
+
+message Comparable {
+  string id = 1;
+  string address = 2;
+  double area = 3;
+  double price = 4;
+  double price_per_sqm = 5;
+  string source = 6;
+  string listed_at = 7;
+}
+
+message PriceStatsRequest {
+  string region = 1;
+  string category = 2;
+}
+
+message PriceStatsResponse {
+  double p25 = 1;
+  double median = 2;
+  double p75 = 3;
+  double avg = 4;
+  int32 sample_size = 5;
+  string period = 6;
+}

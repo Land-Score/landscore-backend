@@ -1,0 +1,217 @@
+services:
+
+  # ── API Gateway ─────────────────────────────────────────────────────────────
+  api-gateway:
+    build: services/api-gateway
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      - auth-service
+      - check-service
+      - search-service
+      - document-service
+    restart: unless-stopped
+    networks: [landscore]
+
+  # ── Auth Service ────────────────────────────────────────────────────────────
+  auth-service:
+    build: services/auth-service
+    env_file: .env
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [landscore]
+
+  # ── Check Service ───────────────────────────────────────────────────────────
+  check-service:
+    build: services/check-service
+    env_file: .env
+    depends_on:
+      postgres-main:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [landscore]
+
+  # ── Search Service ──────────────────────────────────────────────────────────
+  search-service:
+    build: services/search-service
+    env_file: .env
+    depends_on:
+      postgres-main:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [landscore]
+
+  # ── Document Service ────────────────────────────────────────────────────────
+  document-service:
+    build: services/document-service
+    env_file: .env
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [landscore]
+
+  # ── AI Orchestrator ─────────────────────────────────────────────────────────
+  ai-orchestrator:
+    build: services/ai-orchestrator
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      data-collector:
+        condition: service_started
+      geo-service:
+        condition: service_started
+      market-service:
+        condition: service_started
+    restart: unless-stopped
+    networks: [landscore]
+
+  ai-orchestrator-worker:
+    build: services/ai-orchestrator
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=4
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [landscore]
+
+  # ── Data Collector ──────────────────────────────────────────────────────────
+  data-collector:
+    build: services/data-collector
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [landscore]
+
+  # ── Geo Service ─────────────────────────────────────────────────────────────
+  geo-service:
+    build: services/geo-service
+    env_file: .env
+    depends_on:
+      postgres-geo:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [landscore]
+
+  # ── Market Service ──────────────────────────────────────────────────────────
+  market-service:
+    build: services/market-service
+    env_file: .env
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [landscore]
+
+  # ── Infrastructure ───────────────────────────────────────────────────────────
+
+  postgres-auth:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pg_auth:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks: [landscore]
+
+  postgres-main:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: main_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pg_main:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks: [landscore]
+
+  postgres-geo:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_DB: geo_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pg_geo:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks: [landscore]
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [landscore]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [landscore]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    environment:
+      CLICKHOUSE_DB: market
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [landscore]
+
+volumes:
+  pg_auth:
+  pg_main:
+  pg_geo:
+  redis_data:
+  minio_data:
+  clickhouse_data:
+
+networks:
+  landscore:
+    driver: bridge

@@ -1,0 +1,95 @@
+syntax = "proto3";
+package check;
+import "google/protobuf/empty.proto";
+
+service CheckService {
+  rpc CreateCheck(CreateCheckRequest) returns (CheckResponse);
+  rpc GetCheck(CheckIdRequest) returns (CheckResponse);
+  rpc ListChecks(ListChecksRequest) returns (ListChecksResponse);
+  rpc GetCheckStatus(CheckIdRequest) returns (CheckStatusResponse);
+  rpc GetCheckReport(CheckIdRequest) returns (CheckReportResponse);
+  rpc UpdateCheckProgress(UpdateProgressRequest) returns (google.protobuf.Empty);
+  rpc SaveCheckResult(SaveResultRequest) returns (google.protobuf.Empty);
+}
+
+message CreateCheckRequest {
+  string user_id = 1;
+  string cadastral_number = 2;
+  string address = 3;
+  double lat = 4;
+  double lng = 5;
+  string purpose = 6;
+  string user_profile_json = 7;
+}
+
+message CheckIdRequest {
+  string check_id = 1;
+}
+
+message ListChecksRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message ListChecksResponse {
+  repeated CheckResponse checks = 1;
+  int32 total = 2;
+}
+
+message CheckResponse {
+  string check_id = 1;
+  string user_id = 2;
+  string status = 3;
+  string cadastral_number = 4;
+  string address = 5;
+  string created_at = 6;
+  string completed_at = 7;
+}
+
+message CheckStatusResponse {
+  string check_id = 1;
+  string status = 2;
+  string current_step = 3;
+  int32 progress_pct = 4;
+  repeated StepResult completed_steps = 5;
+  string error_message = 6;
+}
+
+message StepResult {
+  string agent_name = 1;
+  string status = 2;
+  int32 duration_ms = 3;
+}
+
+message UpdateProgressRequest {
+  string check_id = 1;
+  string agent_name = 2;
+  string status = 3;
+  int32 progress_pct = 4;
+  string output_json = 5;
+}
+
+message SaveResultRequest {
+  string check_id = 1;
+  string plot_id = 2;
+  int32 overall_score = 3;
+  string legal_risk = 4;
+  repeated string stop_factors = 5;
+  string best_scenario = 6;
+  string report_json = 7;
+  string explanation = 8;
+  repeated string next_steps = 9;
+}
+
+message CheckReportResponse {
+  string check_id = 1;
+  string status = 2;
+  int32 overall_score = 3;
+  string legal_risk = 4;
+  repeated string stop_factors = 5;
+  string best_scenario = 6;
+  string report_json = 7;
+  string explanation = 8;
+  repeated string next_steps = 9;
+}

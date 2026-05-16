@@ -1,0 +1,48 @@
+syntax = "proto3";
+package document;
+
+service DocumentService {
+  rpc ExtractText(ExtractTextRequest) returns (ExtractTextResponse);
+  rpc GetDocument(DocumentIdRequest) returns (DocumentResponse);
+  rpc DeleteDocument(DocumentIdRequest) returns (DeleteResponse);
+  rpc GenerateReport(GenerateReportRequest) returns (GenerateReportResponse);
+}
+
+message ExtractTextRequest {
+  string owner_id = 1;
+  string owner_type = 2;
+  bytes file_data = 3;
+  string filename = 4;
+  string content_type = 5;
+}
+
+message ExtractTextResponse {
+  string document_id = 1;
+  string extracted_text = 2;
+  string storage_path = 3;
+  string doc_type = 4;
+}
+
+message DocumentIdRequest { string document_id = 1; }
+
+message DocumentResponse {
+  string document_id = 1;
+  string owner_id = 2;
+  string storage_path = 3;
+  string extracted_text = 4;
+  string doc_type = 5;
+  string created_at = 6;
+}
+
+message DeleteResponse { bool success = 1; }
+
+message GenerateReportRequest {
+  string check_id = 1;
+  string report_json = 2;
+  string format = 3;
+}
+
+message GenerateReportResponse {
+  string report_id = 1;
+  string download_url = 2;
+}

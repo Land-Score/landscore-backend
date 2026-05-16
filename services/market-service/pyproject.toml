@@ -1,0 +1,12 @@
+[project]
+name = "market-service"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "grpcio>=1.67",
+    "grpcio-tools>=1.67",
+    "clickhouse-connect>=0.8",
+    "httpx>=0.28",
+    "pydantic-settings>=2.6",
+    "structlog>=24.0",
+]

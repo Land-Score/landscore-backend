@@ -1,0 +1,43 @@
+syntax = "proto3";
+package ai_orchestrator;
+
+service AIOrchestrator {
+  rpc RunCheck(RunCheckRequest) returns (RunResponse);
+  rpc RunSearch(RunSearchRequest) returns (RunResponse);
+  rpc GetJobStatus(JobStatusRequest) returns (JobStatusResponse);
+}
+
+message RunCheckRequest {
+  string check_id = 1;
+  string user_id = 2;
+  string user_profile_json = 3;
+  string cadastral_number = 4;
+  string address = 5;
+  double lat = 6;
+  double lng = 7;
+  string purpose = 8;
+  repeated string document_ids = 9;
+}
+
+message RunSearchRequest {
+  string search_id = 1;
+  string user_id = 2;
+  string user_profile_json = 3;
+  string query = 4;
+  string criteria_json = 5;
+}
+
+message RunResponse {
+  string job_id = 1;
+  string status = 2;
+}
+
+message JobStatusRequest { string job_id = 1; }
+
+message JobStatusResponse {
+  string job_id = 1;
+  string status = 2;
+  string current_agent = 3;
+  int32 progress_pct = 4;
+  string error = 5;
+}

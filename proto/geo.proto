@@ -1,0 +1,71 @@
+syntax = "proto3";
+package geo;
+
+service GeoService {
+  rpc AnalyzePlotLocation(LocationRequest) returns (LocationAnalysis);
+  rpc SearchPlotsByArea(AreaSearchRequest) returns (AreaSearchResponse);
+  rpc GetDistances(DistanceRequest) returns (DistanceResponse);
+  rpc CheckProtectedZones(ZoneRequest) returns (ZoneResponse);
+}
+
+message LocationRequest {
+  double lat = 1;
+  double lng = 2;
+  string cadastral_number = 3;
+}
+
+message LocationAnalysis {
+  double distance_to_city_km = 1;
+  double distance_to_road_km = 2;
+  double distance_to_railway_km = 3;
+  bool has_road_access = 4;
+  bool has_electricity = 5;
+  bool has_gas = 6;
+  bool has_water = 7;
+  repeated string protected_zones = 8;
+  string region = 9;
+  string district = 10;
+  string locality = 11;
+  int32 accessibility_score = 12;
+  string raw_json = 13;
+}
+
+message AreaSearchRequest {
+  double center_lat = 1;
+  double center_lng = 2;
+  double radius_km = 3;
+  string region = 4;
+  int32 limit = 5;
+}
+
+message AreaSearchResponse {
+  repeated PlotGeo plots = 1;
+}
+
+message PlotGeo {
+  string cadastral_number = 1;
+  double lat = 2;
+  double lng = 3;
+  double area = 4;
+}
+
+message DistanceRequest {
+  double from_lat = 1;
+  double from_lng = 2;
+  repeated string to_poi_types = 3;
+}
+
+message DistanceResponse {
+  map<string, double> distances_km = 1;
+}
+
+message ZoneRequest {
+  double lat = 1;
+  double lng = 2;
+}
+
+message ZoneResponse {
+  repeated string zone_types = 1;
+  bool is_restricted = 2;
+  string details_json = 3;
+}

@@ -1,0 +1,100 @@
+syntax = "proto3";
+package search;
+import "google/protobuf/empty.proto";
+
+service SearchService {
+  rpc CreateSearch(CreateSearchRequest) returns (SearchResponse);
+  rpc GetSearch(SearchIdRequest) returns (SearchResponse);
+  rpc ListSearches(ListSearchesRequest) returns (ListSearchesResponse);
+  rpc GetSearchStatus(SearchIdRequest) returns (SearchStatusResponse);
+  rpc GetSearchCriteria(SearchIdRequest) returns (SearchCriteriaResponse);
+  rpc ConfirmCriteria(ConfirmCriteriaRequest) returns (google.protobuf.Empty);
+  rpc GetSearchResults(SearchIdRequest) returns (SearchResultsResponse);
+  rpc GetRecommendation(SearchIdRequest) returns (RecommendationResponse);
+  rpc SaveCriteria(SaveCriteriaRequest) returns (google.protobuf.Empty);
+  rpc SaveCandidate(SaveCandidateRequest) returns (google.protobuf.Empty);
+  rpc UpdateSearchProgress(UpdateProgressRequest) returns (google.protobuf.Empty);
+}
+
+message CreateSearchRequest {
+  string user_id = 1;
+  string query = 2;
+  string user_profile_json = 3;
+}
+
+message SearchIdRequest { string search_id = 1; }
+
+message ListSearchesRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message ListSearchesResponse {
+  repeated SearchResponse searches = 1;
+  int32 total = 2;
+}
+
+message SearchResponse {
+  string search_id = 1;
+  string user_id = 2;
+  string query = 3;
+  string status = 4;
+  int32 candidates_count = 5;
+  string created_at = 6;
+}
+
+message SearchStatusResponse {
+  string search_id = 1;
+  string status = 2;
+  string current_step = 3;
+  int32 progress_pct = 4;
+}
+
+message SearchCriteriaResponse {
+  string search_id = 1;
+  string criteria_json = 2;
+  bool confirmed = 3;
+}
+
+message ConfirmCriteriaRequest {
+  string search_id = 1;
+  string criteria_json = 2;
+}
+
+message SaveCriteriaRequest {
+  string search_id = 1;
+  string criteria_json = 2;
+}
+
+message SaveCandidateRequest {
+  string search_id = 1;
+  string plot_id = 2;
+  int32 rank = 3;
+  string scores_json = 4;
+}
+
+message UpdateProgressRequest {
+  string search_id = 1;
+  string agent_name = 2;
+  string status = 3;
+  int32 progress_pct = 4;
+}
+
+message SearchResultsResponse {
+  repeated Candidate candidates = 1;
+}
+
+message Candidate {
+  string plot_id = 1;
+  int32 rank = 2;
+  string scores_json = 3;
+  string plot_summary_json = 4;
+}
+
+message RecommendationResponse {
+  string search_id = 1;
+  string recommendation_json = 2;
+  repeated string top_plot_ids = 3;
+  string explanation = 4;
+}

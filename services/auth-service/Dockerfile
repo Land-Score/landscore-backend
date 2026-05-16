@@ -1,0 +1,15 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY pyproject.toml .
+RUN uv pip install --system -r pyproject.toml
+
+COPY app/ app/
+COPY alembic/ alembic/
+COPY alembic.ini .
+
+EXPOSE 50051
+CMD ["python", "-m", "app.main"]

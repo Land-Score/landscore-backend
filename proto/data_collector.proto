@@ -1,0 +1,58 @@
+syntax = "proto3";
+package data_collector;
+
+service DataCollectorService {
+  rpc GetPlotByCadastral(CadastralRequest) returns (PlotDataResponse);
+  rpc GetPlotByAddress(AddressRequest) returns (PlotDataResponse);
+  rpc GetEGRN(EGRNRequest) returns (EGRNResponse);
+  rpc SearchPlots(SearchPlotsRequest) returns (SearchPlotsResponse);
+}
+
+message CadastralRequest { string cadastral_number = 1; }
+
+message AddressRequest { string address = 1; }
+
+message EGRNRequest {
+  string cadastral_number = 1;
+  bool use_cache = 2;
+}
+
+message PlotDataResponse {
+  string cadastral_number = 1;
+  string address = 2;
+  double area = 3;
+  string category = 4;
+  string allowed_use = 5;
+  string owner_type = 6;
+  double lat = 7;
+  double lng = 8;
+  double price = 9;
+  string status = 10;
+  string raw_json = 11;
+  bool from_cache = 12;
+}
+
+message EGRNResponse {
+  string cadastral_number = 1;
+  string owner = 2;
+  repeated string encumbrances = 3;
+  string registration_date = 4;
+  string raw_json = 5;
+  bool from_cache = 6;
+}
+
+message SearchPlotsRequest {
+  string region = 1;
+  string category = 2;
+  string allowed_use = 3;
+  double area_min = 4;
+  double area_max = 5;
+  double price_min = 6;
+  double price_max = 7;
+  int32 limit = 8;
+}
+
+message SearchPlotsResponse {
+  repeated PlotDataResponse plots = 1;
+  int32 total = 2;
+}

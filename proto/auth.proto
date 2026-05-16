@@ -1,0 +1,75 @@
+syntax = "proto3";
+package auth;
+option py_generic_services = true;
+
+service AuthService {
+  rpc Register(RegisterRequest) returns (AuthResponse);
+  rpc Login(LoginRequest) returns (AuthResponse);
+  rpc RefreshToken(RefreshRequest) returns (AuthResponse);
+  rpc ValidateToken(ValidateRequest) returns (ValidateResponse);
+  rpc GetProfile(GetProfileRequest) returns (UserProfile);
+  rpc UpdateProfile(UpdateProfileRequest) returns (UserProfile);
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string name = 3;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message RefreshRequest {
+  string refresh_token = 1;
+}
+
+message ValidateRequest {
+  string access_token = 1;
+}
+
+message ValidateResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string email = 3;
+}
+
+message AuthResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  string token_type = 3;
+  UserProfile profile = 4;
+}
+
+message GetProfileRequest {
+  string user_id = 1;
+}
+
+message UpdateProfileRequest {
+  string user_id = 1;
+  string client_type = 2;
+  string main_task = 3;
+  string region = 4;
+  repeated string priority = 5;
+  string risk_tolerance = 6;
+  repeated string preferred_scenarios = 7;
+  string organization = 8;
+  float budget = 9;
+}
+
+message UserProfile {
+  string user_id = 1;
+  string email = 2;
+  string name = 3;
+  string client_type = 4;
+  string main_task = 5;
+  string region = 6;
+  repeated string priority = 7;
+  string risk_tolerance = 8;
+  repeated string preferred_scenarios = 9;
+  string organization = 10;
+  float budget = 11;
+  string created_at = 12;
+}

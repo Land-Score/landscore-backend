@@ -2,31 +2,53 @@ services:
 
   # ── API Gateway ─────────────────────────────────────────────────────────────
   api-gateway:
-    build: services/api-gateway
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
     ports:
       - "8000:8000"
     env_file: .env
     depends_on:
-      - auth-service
-      - check-service
-      - search-service
-      - document-service
+      auth-service:
+        condition: service_healthy
+      check-service:
+        condition: service_healthy
+      search-service:
+        condition: service_healthy
+      document-service:
+        condition: service_healthy
     restart: unless-stopped
     networks: [landscore]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # ── Auth Service ────────────────────────────────────────────────────────────
   auth-service:
-    build: services/auth-service
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
     env_file: .env
     depends_on:
       postgres-auth:
         condition: service_healthy
     restart: unless-stopped
     networks: [landscore]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 50051), 2)' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   # ── Check Service ───────────────────────────────────────────────────────────
   check-service:
-    build: services/check-service
+    build:
+      context: .
+      dockerfile: services/check-service/Dockerfile
     env_file: .env
     depends_on:
       postgres-main:
@@ -35,10 +57,18 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks: [landscore]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 50052), 2)' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   # ── Search Service ──────────────────────────────────────────────────────────
   search-service:
-    build: services/search-service
+    build:
+      context: .
+      dockerfile: services/search-service/Dockerfile
     env_file: .env
     depends_on:
       postgres-main:
@@ -47,35 +77,53 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks: [landscore]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 50053), 2)' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   # ── Document Service ────────────────────────────────────────────────────────
   document-service:
-    build: services/document-service
+    build:
+      context: .
+      dockerfile: services/document-service/Dockerfile
     env_file: .env
     depends_on:
       minio:
         condition: service_healthy
     restart: unless-stopped
     networks: [landscore]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 50054), 2)' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # ── AI Orchestrator ─────────────────────────────────────────────────────────
   ai-orchestrator:
-    build: services/ai-orchestrator
+    build:
+      context: .
+      dockerfile: services/ai-orchestrator/Dockerfile
     env_file: .env
     depends_on:
       redis:
         condition: service_healthy
-      data-collector:
-        condition: service_started
-      geo-service:
-        condition: service_started
-      market-service:
-        condition: service_started
     restart: unless-stopped
     networks: [landscore]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 50055), 2)' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   ai-orchestrator-worker:
-    build: services/ai-orchestrator
+    build:
+      context: .
+      dockerfile: services/ai-orchestrator/Dockerfile
     command: celery -A app.celery_app worker --loglevel=info --concurrency=4
     env_file: .env
     depends_on:
@@ -86,33 +134,57 @@ services:
 
   # ── Data Collector ──────────────────────────────────────────────────────────
   data-collector:
-    build: services/data-collector
+    build:
+      context: .
+      dockerfile: services/data-collector/Dockerfile
     env_file: .env
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
     networks: [landscore]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 50056), 2)' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   # ── Geo Service ─────────────────────────────────────────────────────────────
   geo-service:
-    build: services/geo-service
+    build:
+      context: .
+      dockerfile: services/geo-service/Dockerfile
     env_file: .env
     depends_on:
       postgres-geo:
         condition: service_healthy
     restart: unless-stopped
     networks: [landscore]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 50057), 2)' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   # ── Market Service ──────────────────────────────────────────────────────────
   market-service:
-    build: services/market-service
+    build:
+      context: .
+      dockerfile: services/market-service/Dockerfile
     env_file: .env
     depends_on:
       clickhouse:
         condition: service_healthy
     restart: unless-stopped
     networks: [landscore]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; socket.create_connection((\"localhost\", 50058), 2)' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   # ── Infrastructure ───────────────────────────────────────────────────────────
 

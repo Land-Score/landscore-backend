@@ -2,39 +2,53 @@ syntax = "proto3";
 package document;
 
 service DocumentService {
+  rpc StoreDocument(StoreDocumentRequest) returns (StoreDocumentResponse);
   rpc ExtractText(ExtractTextRequest) returns (ExtractTextResponse);
-  rpc GetDocument(DocumentIdRequest) returns (DocumentResponse);
-  rpc DeleteDocument(DocumentIdRequest) returns (DeleteResponse);
+  rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+  rpc DeleteDocument(DeleteDocumentRequest) returns (DeleteDocumentResponse);
   rpc GenerateReport(GenerateReportRequest) returns (GenerateReportResponse);
 }
 
+message StoreDocumentRequest {
+  string user_id = 1;
+  string filename = 2;
+  string content_type = 3;
+  bytes data = 4;
+}
+
+message StoreDocumentResponse {
+  string document_id = 1;
+  string filename = 2;
+  int64 size_bytes = 3;
+  string storage_path = 4;
+}
+
 message ExtractTextRequest {
-  string owner_id = 1;
-  string owner_type = 2;
-  bytes file_data = 3;
-  string filename = 4;
-  string content_type = 5;
+  string document_id = 1;
 }
 
 message ExtractTextResponse {
   string document_id = 1;
   string extracted_text = 2;
-  string storage_path = 3;
-  string doc_type = 4;
+  string doc_type = 3;
+  int32 page_count = 4;
+  string extraction_method = 5;
 }
 
-message DocumentIdRequest { string document_id = 1; }
+message GetDocumentRequest { string document_id = 1; }
 
-message DocumentResponse {
+message GetDocumentResponse {
   string document_id = 1;
-  string owner_id = 2;
-  string storage_path = 3;
-  string extracted_text = 4;
-  string doc_type = 5;
-  string created_at = 6;
+  string user_id = 2;
+  string filename = 3;
+  int64 size_bytes = 4;
+  string content_type = 5;
+  string download_url = 6;
+  string created_at = 7;
 }
 
-message DeleteResponse { bool success = 1; }
+message DeleteDocumentRequest { string document_id = 1; }
+message DeleteDocumentResponse { bool success = 1; }
 
 message GenerateReportRequest {
   string check_id = 1;

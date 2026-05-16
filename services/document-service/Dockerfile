@@ -5,8 +5,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-COPY pyproject.toml .
+COPY services/document-service/pyproject.toml .
 RUN uv pip install --system -r pyproject.toml
-COPY app/ app/
+COPY services/document-service/app/ app/
 EXPOSE 50054
 CMD ["python", "-m", "app.main"]

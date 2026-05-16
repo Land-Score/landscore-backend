@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     search_grpc: str = "search-service:50053"
     document_grpc: str = "document-service:50054"
 
+    allowed_origins: list[str] = ["http://localhost:3000"]
     rate_limit_per_minute: int = 60
 
     model_config = {"env_file": ".env", "extra": "ignore"}

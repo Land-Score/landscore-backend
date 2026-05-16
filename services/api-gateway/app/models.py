@@ -25,10 +25,10 @@ class UpdateProfileRequest(BaseModel):
     main_task: str | None = Field(None, examples=["land_check"],
         description="land_check | land_plot_selection | portfolio")
     region: str | None = Field(None, examples=["Московская область"])
-    priority: list[str] = Field([], examples=[["legal_risk", "infrastructure"]])
+    priority: list[str] = Field(default_factory=list, examples=[["legal_risk", "infrastructure"]])
     risk_tolerance: str | None = Field(None, examples=["medium"],
         description="low | medium | high")
-    preferred_scenarios: list[str] = Field([], examples=[["construction", "resale"]])
+    preferred_scenarios: list[str] = Field(default_factory=list, examples=[["construction", "resale"]])
     organization: str | None = Field(None, examples=["ООО Ромашка"])
     budget: float | None = Field(None, examples=[5000000.0])
 

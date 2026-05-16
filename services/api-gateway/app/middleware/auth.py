@@ -1,9 +1,7 @@
+import grpc
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
-
-from app.config import settings
 
 # Paths that don't require a valid JWT
 _PUBLIC = {
@@ -35,18 +33,43 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         token = auth_header.removeprefix("Bearer ").strip()
-        try:
-            payload = jwt.decode(
-                token,
-                settings.jwt_secret,
-                algorithms=[settings.jwt_algorithm],
-            )
-            request.state.user_id = payload["sub"]
-            request.state.email = payload.get("email", "")
-        except JWTError as exc:
+        if not token:
             return JSONResponse(
-                {"error": "UNAUTHORIZED", "message": f"Invalid token: {exc}"},
+                {"error": "UNAUTHORIZED", "message": "Empty bearer token"},
                 status_code=401,
             )
 
+        stub = getattr(request.app.state, "auth_stub", None)
+        if stub is None:
+            return JSONResponse(
+                {"error": "AUTH_SERVICE_UNAVAILABLE", "message": "Auth service client is not initialized"},
+                status_code=503,
+            )
+
+        try:
+            import auth_pb2
+
+            result = await stub.ValidateToken(
+                auth_pb2.ValidateRequest(access_token=token),
+                timeout=3,
+            )
+        except grpc.RpcError as exc:
+            code = exc.code()
+            status_code = 503 if code in {
+                grpc.StatusCode.UNAVAILABLE,
+                grpc.StatusCode.DEADLINE_EXCEEDED,
+            } else 401
+            return JSONResponse(
+                {"error": "UNAUTHORIZED", "message": exc.details() or "Token validation failed"},
+                status_code=status_code,
+            )
+
+        if not result.valid:
+            return JSONResponse(
+                {"error": "UNAUTHORIZED", "message": "Invalid or expired token"},
+                status_code=401,
+            )
+
+        request.state.user_id = result.user_id
+        request.state.email = result.email
         return await call_next(request)

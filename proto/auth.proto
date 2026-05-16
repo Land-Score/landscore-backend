@@ -49,14 +49,16 @@ message GetProfileRequest {
 
 message UpdateProfileRequest {
   string user_id = 1;
-  string client_type = 2;
-  string main_task = 3;
-  string region = 4;
+  optional string client_type = 2;
+  optional string main_task = 3;
+  optional string region = 4;
   repeated string priority = 5;
-  string risk_tolerance = 6;
+  optional string risk_tolerance = 6;
   repeated string preferred_scenarios = 7;
-  string organization = 8;
-  float budget = 9;
+  optional string organization = 8;
+  optional float budget = 9;
+  bool priority_set = 10;
+  bool preferred_scenarios_set = 11;
 }
 
 message UserProfile {

@@ -1,7 +1,5 @@
-import json
 import grpc
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Request
 
 from app.errors import raise_for_grpc
 from app.models import (
@@ -143,11 +141,13 @@ async def update_profile(body: UpdateProfileRequest, request: Request) -> UserPr
             req.main_task = body.main_task
         if body.region is not None:
             req.region = body.region
-        if body.priority:
+        if "priority" in body.model_fields_set:
+            req.priority_set = True
             req.priority.extend(body.priority)
         if body.risk_tolerance is not None:
             req.risk_tolerance = body.risk_tolerance
-        if body.preferred_scenarios:
+        if "preferred_scenarios" in body.model_fields_set:
+            req.preferred_scenarios_set = True
             req.preferred_scenarios.extend(body.preferred_scenarios)
         if body.organization is not None:
             req.organization = body.organization

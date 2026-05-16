@@ -2,10 +2,10 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 
-import grpc
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -152,3 +152,46 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         status_code=500,
         content={"error": "INTERNAL_SERVER_ERROR", "message": "Unexpected server error"},
     )
+
+
+# ── OpenAPI security scheme ───────────────────────────────────────────────────
+
+_PUBLIC_PATHS = {
+    "/health",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/api/auth/register",
+    "/api/auth/login",
+    "/api/auth/refresh",
+}
+
+
+def _custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {}).setdefault("securitySchemes", {})["BearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Access token полученный при /api/auth/login или /api/auth/register",
+    }
+
+    for path, methods in schema.get("paths", {}).items():
+        if path not in _PUBLIC_PATHS:
+            for method_data in methods.values():
+                if isinstance(method_data, dict):
+                    method_data.setdefault("security", [{"BearerAuth": []}])
+
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi

@@ -15,11 +15,11 @@ if _proto_gen not in sys.path:
     sys.path.insert(0, _proto_gen)
 
 
-import grpc
-import structlog
-from fastapi import FastAPI
+import grpc  # noqa: E402
+import structlog  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
 
-from app.config import settings
+from app.config import settings  # noqa: E402
 
 log = structlog.get_logger()
 

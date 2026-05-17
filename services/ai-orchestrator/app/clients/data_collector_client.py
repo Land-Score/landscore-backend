@@ -52,3 +52,13 @@ class DataCollectorClient:
             stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
             response = await stub.CollectPlotSpatialLayers(request)
         return MessageToDict(response, preserving_proto_field_name=True)
+
+    async def collect_plot_dataset(self, cadastral_number: str) -> dict:
+        if data_collector_pb2 is None or data_collector_pb2_grpc is None:
+            raise RuntimeError("Generated data_collector proto stubs are missing. Run `make proto` first.")
+
+        request = data_collector_pb2.CadastralRequest(cadastral_number=cadastral_number)
+        async with grpc.aio.insecure_channel(self.target) as channel:
+            stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
+            response = await stub.CollectPlotDataset(request)
+        return MessageToDict(response, preserving_proto_field_name=True)

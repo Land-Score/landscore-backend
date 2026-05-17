@@ -15,7 +15,7 @@ from app.clients import setup_clients, close_clients
 from app.config import settings
 from app.middleware.auth import AuthMiddleware
 from app.models import HealthResponse, ServiceHealthItem
-from app.routers import auth, cadastral, checks, searches, documents
+from app.routers import alice, auth, cadastral, checks, searches, documents
 
 log = structlog.get_logger()
 
@@ -103,6 +103,7 @@ app.include_router(cadastral.router, prefix="/api/cadastral", tags=["Кадас�
 app.include_router(checks.router,    prefix="/api/checks",    tags=["Проверка участка"])
 app.include_router(searches.router,  prefix="/api/searches",  tags=["Поиск участка"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Документы"])
+app.include_router(alice.router,     prefix="/api/alice",     tags=["Alice"])
 
 
 # ── System endpoints ──────────────────────────────────────────────────────────
@@ -168,6 +169,7 @@ _PUBLIC_PATHS = {
     "/api/auth/login",
     "/api/auth/refresh",
     "/api/cadastral/lookup",
+    "/api/alice/webhook",
 }
 
 

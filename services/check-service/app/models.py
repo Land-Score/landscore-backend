@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Integer, JSON, ARRAY
+from sqlalchemy import String, DateTime, ForeignKey, Integer, JSON, ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -28,7 +28,11 @@ class CheckStep(Base):
     __tablename__ = "check_steps"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    check_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    check_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("land_checks.id", ondelete="CASCADE"),
+        index=True,
+    )
     agent_name: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(20), default="pending")
     progress_pct: Mapped[int] = mapped_column(Integer, default=0)
@@ -40,7 +44,11 @@ class CheckStep(Base):
 class CheckResult(Base):
     __tablename__ = "check_results"
 
-    check_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    check_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("land_checks.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
     plot_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     overall_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     legal_risk: Mapped[str | None] = mapped_column(String(20), nullable=True)

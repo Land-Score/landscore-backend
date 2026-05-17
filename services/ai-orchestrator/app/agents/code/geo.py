@@ -16,6 +16,25 @@ def _properties(layer: dict) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _valid_geometry_json(value) -> bool:
+    if isinstance(value, dict):
+        geometry = value
+    else:
+        try:
+            geometry = json.loads(value or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return False
+    return geometry.get("type") in {
+        "Point",
+        "LineString",
+        "Polygon",
+        "MultiPoint",
+        "MultiLineString",
+        "MultiPolygon",
+        "GeometryCollection",
+    } and bool(geometry.get("coordinates") or geometry.get("geometries"))
+
+
 def _to_geo_restriction_layer(layer: dict) -> dict:
     return {
         "id": layer.get("id", ""),
@@ -106,7 +125,7 @@ class GeoAgent(Agent):
     async def run(self, input: dict, ctx: AgentContext) -> AgentResult:
         spatial_layers = ctx.get("spatial_layers") or ctx.get("DataRequestAgent", {}).get("spatial_layers")
         parcel_geometry_geojson = ctx.get("parcel_geometry_geojson") or (spatial_layers or {}).get("parcel_geometry_geojson", "")
-        if not spatial_layers or not parcel_geometry_geojson:
+        if not spatial_layers or not _valid_geometry_json(parcel_geometry_geojson):
             ctx.set("map_summary", {
                 "geometry_status": "missing",
                 "parcel_area_ha": None,

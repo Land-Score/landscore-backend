@@ -85,6 +85,11 @@ class SearchServiceStub(object):
                 request_serializer=search__pb2.SaveCandidateRequest.SerializeToString,
                 response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                 _registered_method=True)
+        self.SaveRecommendation = channel.unary_unary(
+                '/search.SearchService/SaveRecommendation',
+                request_serializer=search__pb2.SaveRecommendationRequest.SerializeToString,
+                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                _registered_method=True)
         self.UpdateSearchProgress = channel.unary_unary(
                 '/search.SearchService/UpdateSearchProgress',
                 request_serializer=search__pb2.UpdateProgressRequest.SerializeToString,
@@ -155,6 +160,12 @@ class SearchServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SaveRecommendation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def UpdateSearchProgress(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -212,6 +223,11 @@ def add_SearchServiceServicer_to_server(servicer, server):
             'SaveCandidate': grpc.unary_unary_rpc_method_handler(
                     servicer.SaveCandidate,
                     request_deserializer=search__pb2.SaveCandidateRequest.FromString,
+                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            ),
+            'SaveRecommendation': grpc.unary_unary_rpc_method_handler(
+                    servicer.SaveRecommendation,
+                    request_deserializer=search__pb2.SaveRecommendationRequest.FromString,
                     response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             ),
             'UpdateSearchProgress': grpc.unary_unary_rpc_method_handler(
@@ -489,6 +505,33 @@ class SearchService(object):
             target,
             '/search.SearchService/SaveCandidate',
             search__pb2.SaveCandidateRequest.SerializeToString,
+            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SaveRecommendation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/search.SearchService/SaveRecommendation',
+            search__pb2.SaveRecommendationRequest.SerializeToString,
             google_dot_protobuf_dot_empty__pb2.Empty.FromString,
             options,
             channel_credentials,

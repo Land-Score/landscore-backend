@@ -15,6 +15,7 @@ _PUBLIC = {
     "/api/cadastral/lookup",
     "/api/cadastral/spatial-layers",
     "/api/cadastral/map-analysis",
+    "/api/alice/webhook",
 }
 
 # Prefixes that are always public (Swagger static assets)

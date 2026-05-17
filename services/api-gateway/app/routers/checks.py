@@ -155,7 +155,7 @@ async def get_report(check_id: str, request: Request) -> CheckReportResponse:
         return CheckReportResponse(
             check_id=resp.check_id,
             status=resp.status,
-            overall_score=resp.overall_score or None,
+            overall_score=resp.overall_score,
             legal_risk=resp.legal_risk or None,
             stop_factors=list(resp.stop_factors),
             best_scenario=resp.best_scenario or None,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import math
 from typing import Any
 
-from shapely.geometry import shape
+from shapely.geometry import mapping, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -19,6 +20,7 @@ from app.restrictions.rules import get_rule
 
 
 SQM_PER_HECTARE = 10_000.0
+WEB_MERCATOR_RADIUS_M = 6_378_137.0
 
 
 def _geometry_from_geojson(geometry: dict[str, Any]) -> BaseGeometry:
@@ -28,10 +30,97 @@ def _geometry_from_geojson(geometry: dict[str, Any]) -> BaseGeometry:
     return parsed
 
 
+def _is_position(value: Any) -> bool:
+    return (
+        isinstance(value, list | tuple)
+        and len(value) >= 2
+        and isinstance(value[0], int | float)
+        and isinstance(value[1], int | float)
+    )
+
+
+def _transform_coordinates(value: Any, point_transform) -> Any:
+    if _is_position(value):
+        transformed = list(point_transform(float(value[0]), float(value[1])))
+        if len(value) > 2:
+            transformed.extend(value[2:])
+        return transformed
+    if isinstance(value, list | tuple):
+        return [_transform_coordinates(item, point_transform) for item in value]
+    return value
+
+
+def _transform_geojson_geometry(geometry: dict[str, Any], point_transform) -> dict[str, Any]:
+    if geometry.get("type") == "GeometryCollection":
+        return {
+            "type": "GeometryCollection",
+            "geometries": [
+                _transform_geojson_geometry(item, point_transform)
+                for item in geometry.get("geometries", [])
+                if isinstance(item, dict)
+            ],
+        }
+    return {
+        "type": geometry.get("type"),
+        "coordinates": _transform_coordinates(geometry.get("coordinates"), point_transform),
+    }
+
+
+def _web_mercator_to_lonlat(x: float, y: float) -> tuple[float, float]:
+    lon = math.degrees(x / WEB_MERCATOR_RADIUS_M)
+    lat = math.degrees(2 * math.atan(math.exp(y / WEB_MERCATOR_RADIUS_M)) - math.pi / 2)
+    return lon, lat
+
+
+def _lonlat_to_local_meters(lon: float, lat: float, lon0: float, lat0: float) -> tuple[float, float]:
+    lat0_rad = math.radians(lat0)
+    return (
+        WEB_MERCATOR_RADIUS_M * math.radians(lon - lon0) * math.cos(lat0_rad),
+        WEB_MERCATOR_RADIUS_M * math.radians(lat - lat0),
+    )
+
+
+def _is_lonlat_geometry(geometry: BaseGeometry) -> bool:
+    minx, miny, maxx, maxy = geometry.bounds
+    return -180 <= minx <= 180 and -180 <= maxx <= 180 and -90 <= miny <= 90 and -90 <= maxy <= 90
+
+
+def _is_web_mercator_geometry(geometry: BaseGeometry) -> bool:
+    minx, miny, maxx, maxy = geometry.bounds
+    return max(abs(minx), abs(maxx)) > 180 or max(abs(miny), abs(maxy)) > 90
+
+
+def _metric_geometry_for_area(geometry: BaseGeometry) -> BaseGeometry:
+    if geometry.is_empty:
+        return geometry
+
+    centroid = geometry.centroid
+    geojson = mapping(geometry)
+    if _is_lonlat_geometry(geometry):
+        lon0, lat0 = centroid.x, centroid.y
+
+        def project_lonlat(lon: float, lat: float) -> tuple[float, float]:
+            return _lonlat_to_local_meters(lon, lat, lon0, lat0)
+
+        return shape(_transform_geojson_geometry(geojson, project_lonlat))
+
+    if _is_web_mercator_geometry(geometry):
+        lon0, lat0 = _web_mercator_to_lonlat(centroid.x, centroid.y)
+
+        def project_web_mercator(x: float, y: float) -> tuple[float, float]:
+            lon, lat = _web_mercator_to_lonlat(x, y)
+            return _lonlat_to_local_meters(lon, lat, lon0, lat0)
+
+        return shape(_transform_geojson_geometry(geojson, project_web_mercator))
+
+    return geometry
+
+
 def _area_ha(geometry: BaseGeometry | None) -> float:
     if geometry is None or geometry.is_empty:
         return 0.0
-    return max(0.0, geometry.area / SQM_PER_HECTARE)
+    metric_geometry = _metric_geometry_for_area(geometry)
+    return max(0.0, metric_geometry.area / SQM_PER_HECTARE)
 
 
 def _round_ha(value: float) -> float:
@@ -85,7 +174,7 @@ def calculate_land_use_restrictions(request: RestrictionAnalysisRequest) -> Rest
     parcel_area_ha = request.parcel_area_ha or _area_ha(parcel)
     warnings: list[str] = []
     assumptions = [
-        "Площади считаются по входным геометриям в метрической проекции; для WGS84 перед расчетом нужен reprojection на локальную метрическую систему координат.",
+        "Площади считаются после локального пересчета в метровую плоскость; EPSG:3857 и WGS84 не используются напрямую как равноплощадные системы.",
         "Нейрозрение может классифицировать карту/легенду, но итоговые гектары должны подтверждаться геометрическими слоями.",
     ]
 

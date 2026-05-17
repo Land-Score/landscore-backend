@@ -8,18 +8,19 @@ class DataRequestAgent(Agent):
     async def run(self, input: dict, ctx: AgentContext) -> AgentResult:
         parcel_geometry_geojson = ctx.get("parcel_geometry_geojson", "")
         raw_features_by_layer_json = ctx.get("raw_features_by_layer_json", "{}")
-        if not parcel_geometry_geojson:
+        cadastral_number = getattr(ctx.plot, "cadastral_number", "")
+        if not parcel_geometry_geojson and not cadastral_number:
             return AgentResult(
                 success=True,
                 data={
                     "spatial_layers_available": False,
-                    "reason": "parcel_geometry_geojson is missing; spatial layer collection skipped",
+                    "reason": "parcel_geometry_geojson and cadastral_number are missing; spatial layer collection skipped",
                 },
             )
 
         try:
             spatial_layers = await DataCollectorClient().collect_spatial_layers(
-                cadastral_number=ctx.plot.cadastral_number,
+                cadastral_number=cadastral_number,
                 parcel_geometry_geojson=parcel_geometry_geojson,
                 raw_features_by_layer_json=raw_features_by_layer_json,
             )

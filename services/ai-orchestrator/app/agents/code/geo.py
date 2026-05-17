@@ -1,6 +1,63 @@
+import json
+
 from app.pipeline.base import Agent, AgentResult
 from app.pipeline.context import AgentContext
 from app.clients.geo_client import GeoClient
+
+
+def _properties(layer: dict) -> dict:
+    raw = layer.get("properties_json") or "{}"
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _to_geo_restriction_layer(layer: dict) -> dict:
+    return {
+        "id": layer.get("id", ""),
+        "layer_type": layer.get("normalized_type") or layer.get("layer_type", ""),
+        "name": layer.get("label") or layer.get("name", ""),
+        "source": layer.get("source", ""),
+        "geometry_geojson": layer.get("geometry_geojson", "{}"),
+        "restrictions": layer.get("restrictions", []),
+        "normative_basis": layer.get("normative_basis", []),
+        "properties_json": layer.get("properties_json", "{}"),
+    }
+
+
+def _to_geo_land_use_layer(layer: dict) -> dict:
+    props = _properties(layer)
+    return {
+        "id": layer.get("id", ""),
+        "land_use_type": props.get("landUseType") or layer.get("normalized_type") or "unknown",
+        "label": layer.get("label") or layer.get("source_layer_name", ""),
+        "geometry_geojson": layer.get("geometry_geojson", "{}"),
+        "source": layer.get("source", ""),
+        "confidence": float(layer.get("confidence") or 0.0),
+        "properties_json": layer.get("properties_json", "{}"),
+    }
+
+
+def _to_geo_real_estate_object(layer: dict) -> dict:
+    props = _properties(layer)
+    area = props.get("area") or props.get("specified_area") or props.get("declared_area") or 0
+    try:
+        area_sqm = float(area or 0)
+    except (TypeError, ValueError):
+        area_sqm = 0.0
+    return {
+        "cadastral_number": str(props.get("cadastralNumber") or ""),
+        "object_type": props.get("objectType") or layer.get("normalized_type") or "unknown",
+        "name": layer.get("label") or layer.get("source_layer_name", ""),
+        "area_sqm": area_sqm,
+        "geometry_geojson": layer.get("geometry_geojson", "{}"),
+        "properties_json": layer.get("properties_json", "{}"),
+    }
+
 
 class GeoAgent(Agent):
     name = "GeoAgent"
@@ -27,9 +84,18 @@ class GeoAgent(Agent):
                 scenario=scenario,
                 parcel_geometry_geojson=parcel_geometry_geojson,
                 parcel_area_ha=(ctx.plot.area / 10_000.0 if ctx.plot.area > 1000 else ctx.plot.area),
-                restriction_layers=spatial_layers.get("restriction_layers", []),
-                land_use_layers=spatial_layers.get("land_use_layers", []),
-                real_estate_objects=spatial_layers.get("real_estate_objects", []),
+                restriction_layers=[
+                    _to_geo_restriction_layer(layer)
+                    for layer in spatial_layers.get("restriction_layers", [])
+                ],
+                land_use_layers=[
+                    _to_geo_land_use_layer(layer)
+                    for layer in spatial_layers.get("land_use_layers", [])
+                ],
+                real_estate_objects=[
+                    _to_geo_real_estate_object(layer)
+                    for layer in spatial_layers.get("real_estate_objects", [])
+                ],
                 vision_interpretation_json=ctx.get("vision_interpretation_json", ""),
             )
         except Exception as exc:

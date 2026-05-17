@@ -32,6 +32,7 @@ async def setup_clients(app: FastAPI) -> None:
     import search_pb2_grpc
     import document_pb2_grpc
     import data_collector_pb2_grpc
+    import geo_pb2_grpc
 
     app.state.auth_channel = grpc.aio.insecure_channel(settings.auth_grpc)
     app.state.auth_stub = auth_pb2_grpc.AuthServiceStub(app.state.auth_channel)
@@ -48,6 +49,9 @@ async def setup_clients(app: FastAPI) -> None:
     app.state.data_collector_channel = grpc.aio.insecure_channel(settings.data_collector_grpc)
     app.state.data_collector_stub = data_collector_pb2_grpc.DataCollectorServiceStub(app.state.data_collector_channel)
 
+    app.state.geo_channel = grpc.aio.insecure_channel(settings.geo_grpc)
+    app.state.geo_stub = geo_pb2_grpc.GeoServiceStub(app.state.geo_channel)
+
     log.info(
         "grpc_clients_initialized",
         auth=settings.auth_grpc,
@@ -55,12 +59,13 @@ async def setup_clients(app: FastAPI) -> None:
         search=settings.search_grpc,
         document=settings.document_grpc,
         data_collector=settings.data_collector_grpc,
+        geo=settings.geo_grpc,
     )
 
 
 async def close_clients(app: FastAPI) -> None:
     """Close all gRPC channels at shutdown."""
-    for name in ("auth_channel", "check_channel", "search_channel", "document_channel", "data_collector_channel"):
+    for name in ("auth_channel", "check_channel", "search_channel", "document_channel", "data_collector_channel", "geo_channel"):
         ch = getattr(app.state, name, None)
         if ch:
             await ch.close()

@@ -121,6 +121,7 @@ async def health_check() -> HealthResponse:
         ("search-service",   settings.search_grpc),
         ("document-service", settings.document_grpc),
         ("data-collector",   settings.data_collector_grpc),
+        ("geo-service",      settings.geo_grpc),
     ]
 
     async def probe(name: str, address: str) -> ServiceHealthItem:

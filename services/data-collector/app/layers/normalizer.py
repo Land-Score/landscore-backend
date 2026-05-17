@@ -74,6 +74,11 @@ def normalize_feature(feature: dict[str, Any], source_layer_key: str, *, source:
             "scenarioEffects": scenario_effects,
         }
     )
+    if entry.payload_kind == "land_use":
+        properties["landUseType"] = entry.normalized_type
+    elif entry.payload_kind == "real_estate_object":
+        properties["objectType"] = entry.normalized_type
+
     cadastral_number = _find_cadastral_number(attrs)
     if cadastral_number:
         properties["cadastralNumber"] = cadastral_number
@@ -134,3 +139,14 @@ def to_geo_real_estate_object(layer: CollectedSpatialLayer) -> dict[str, Any]:
         "properties_json": json.dumps(layer.properties, ensure_ascii=False),
     }
 
+
+def to_geo_land_use_layer(layer: CollectedSpatialLayer) -> dict[str, Any]:
+    return {
+        "id": layer.id,
+        "land_use_type": layer.normalized_type,
+        "label": layer.label,
+        "geometry_geojson": json.dumps(layer.geometry or {}, ensure_ascii=False),
+        "source": layer.source,
+        "confidence": layer.confidence,
+        "properties_json": json.dumps(layer.properties, ensure_ascii=False),
+    }

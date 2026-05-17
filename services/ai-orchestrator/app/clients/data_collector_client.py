@@ -25,6 +25,7 @@ class DataCollectorClient:
         *,
         cadastral_number: str,
         parcel_geometry_geojson: str,
+        source_layer_keys: list[str] | None = None,
         raw_features_by_layer_json: str = "{}",
         include_restrictions: bool = True,
         include_land_use: bool = True,
@@ -45,6 +46,8 @@ class DataCollectorClient:
             include_informational_layers=include_informational_layers,
             use_cache=use_cache,
         )
+        if source_layer_keys:
+            request.source_layer_keys.extend(source_layer_keys)
         async with grpc.aio.insecure_channel(self.target) as channel:
             stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
             response = await stub.CollectPlotSpatialLayers(request)

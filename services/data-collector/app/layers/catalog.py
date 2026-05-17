@@ -231,6 +231,60 @@ LAYER_CATALOG: dict[str, LayerCatalogEntry] = {
         normative_basis=("Водный кодекс РФ, статья 65",),
         scenario_effects=_effects(),
     ),
+    "land_use_arable": LayerCatalogEntry(
+        key="land_use_arable",
+        source_group="agricultural_land_use",
+        source_name="Пашня",
+        payload_kind="land_use",
+        normalized_type="arable",
+        label="Пашня",
+        severity="info",
+    ),
+    "land_use_pasture": LayerCatalogEntry(
+        key="land_use_pasture",
+        source_group="agricultural_land_use",
+        source_name="Пастбища",
+        payload_kind="land_use",
+        normalized_type="pasture",
+        label="Пастбище",
+        severity="info",
+    ),
+    "land_use_hayfield": LayerCatalogEntry(
+        key="land_use_hayfield",
+        source_group="agricultural_land_use",
+        source_name="Сенокосы",
+        payload_kind="land_use",
+        normalized_type="hayfield",
+        label="Сенокос",
+        severity="info",
+    ),
+    "land_use_fallow": LayerCatalogEntry(
+        key="land_use_fallow",
+        source_group="agricultural_land_use",
+        source_name="Залежь",
+        payload_kind="land_use",
+        normalized_type="fallow",
+        label="Залежь",
+        severity="info",
+    ),
+    "land_use_perennial_planting": LayerCatalogEntry(
+        key="land_use_perennial_planting",
+        source_group="agricultural_land_use",
+        source_name="Многолетние насаждения",
+        payload_kind="land_use",
+        normalized_type="perennial_planting",
+        label="Многолетние насаждения",
+        severity="info",
+    ),
+    "land_use_unknown": LayerCatalogEntry(
+        key="land_use_unknown",
+        source_group="agricultural_land_use",
+        source_name="Угодья, тип требует уточнения",
+        payload_kind="land_use",
+        normalized_type="unknown",
+        label="Угодья, тип требует уточнения",
+        severity="info",
+    ),
     "special_economic_zone": LayerCatalogEntry(
         key="special_economic_zone",
         source_group="socio_economic",
@@ -515,4 +569,3 @@ def get_catalog_entry(layer_key: str) -> LayerCatalogEntry | None:
     if layer_key in DISTURBED_LAND_LAYER_KEYS:
         return LAYER_CATALOG["disturbed_land"]
     return LAYER_CATALOG.get(layer_key)
-

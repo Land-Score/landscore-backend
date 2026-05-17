@@ -20,6 +20,8 @@ if BaseSettings is not None:
         rosreestr_user_agent: str = "LandScoreAI/0.1 (+https://landscore.local)"
         source_timeout: float = 12.0
         market_search_enabled: bool = False
+        nspd_map_layers_enabled: bool = True
+        nspd_map_layers_timeout: float = 30.0
 
         model_config = {"env_file": ".env", "extra": "ignore"}
 else:
@@ -37,6 +39,8 @@ else:
         rosreestr_user_agent: str = os.getenv("ROSREESTR_USER_AGENT", "LandScoreAI/0.1 (+https://landscore.local)")
         source_timeout: float = float(os.getenv("SOURCE_TIMEOUT", "12"))
         market_search_enabled: bool = os.getenv("MARKET_SEARCH_ENABLED", "false").lower() in {"1", "true", "yes"}
+        nspd_map_layers_enabled: bool = os.getenv("NSPD_MAP_LAYERS_ENABLED", "true").lower() in {"1", "true", "yes"}
+        nspd_map_layers_timeout: float = float(os.getenv("NSPD_MAP_LAYERS_TIMEOUT", "30"))
 
 
 settings = Settings()

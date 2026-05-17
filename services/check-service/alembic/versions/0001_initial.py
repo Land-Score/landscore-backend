@@ -1,4 +1,4 @@
-"""initial schema
+"""initial check schema
 
 Revision ID: 0001
 Revises:
@@ -16,6 +16,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Idempotent: skip tables that already exist (e.g. created by create_all()
+    # on a previous startup before alembic_version_check was stamped).
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     existing = set(inspector.get_table_names())
@@ -35,6 +37,7 @@ def upgrade() -> None:
             sa.Column("completed_at", sa.DateTime(), nullable=True),
         )
         op.create_index("ix_land_checks_user_id", "land_checks", ["user_id"])
+        op.create_index("ix_land_checks_status", "land_checks", ["status"])
 
     if "check_steps" not in existing:
         op.create_table(
@@ -44,12 +47,13 @@ def upgrade() -> None:
             sa.Column("agent_name", sa.String(100), nullable=False),
             sa.Column("status", sa.String(20), nullable=False, server_default="pending"),
             sa.Column("progress_pct", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("output_json", postgresql.JSON(), nullable=True),
+            sa.Column("output_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
             sa.Column("started_at", sa.DateTime(), nullable=True),
             sa.Column("completed_at", sa.DateTime(), nullable=True),
             sa.ForeignKeyConstraint(["check_id"], ["land_checks.id"], ondelete="CASCADE"),
         )
         op.create_index("ix_check_steps_check_id", "check_steps", ["check_id"])
+        op.create_index("ix_check_steps_check_id_agent_name", "check_steps", ["check_id", "agent_name"], unique=True)
 
     if "check_results" not in existing:
         op.create_table(
@@ -65,8 +69,8 @@ def upgrade() -> None:
                 server_default=sa.text("'{}'::varchar[]"),
             ),
             sa.Column("best_scenario", sa.String(50), nullable=True),
-            sa.Column("report_json", postgresql.JSON(), nullable=True),
-            sa.Column("explanation", sa.Text(), nullable=True),
+            sa.Column("report_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+            sa.Column("explanation", sa.String(), nullable=True),
             sa.Column(
                 "next_steps",
                 postgresql.ARRAY(sa.String()),
@@ -79,7 +83,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("check_results")
+    op.drop_index("ix_check_steps_check_id_agent_name", table_name="check_steps")
     op.drop_index("ix_check_steps_check_id", table_name="check_steps")
     op.drop_table("check_steps")
+    op.drop_index("ix_land_checks_status", table_name="land_checks")
     op.drop_index("ix_land_checks_user_id", table_name="land_checks")
     op.drop_table("land_checks")

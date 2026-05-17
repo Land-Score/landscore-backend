@@ -13,6 +13,7 @@ service SearchService {
   rpc GetRecommendation(SearchIdRequest) returns (RecommendationResponse);
   rpc SaveCriteria(SaveCriteriaRequest) returns (google.protobuf.Empty);
   rpc SaveCandidate(SaveCandidateRequest) returns (google.protobuf.Empty);
+  rpc SaveRecommendation(SaveRecommendationRequest) returns (google.protobuf.Empty);
   rpc UpdateSearchProgress(UpdateProgressRequest) returns (google.protobuf.Empty);
 }
 
@@ -72,6 +73,14 @@ message SaveCandidateRequest {
   string plot_id = 2;
   int32 rank = 3;
   string scores_json = 4;
+  string plot_summary_json = 5;
+}
+
+message SaveRecommendationRequest {
+  string search_id = 1;
+  string recommendation_json = 2;
+  repeated string top_plot_ids = 3;
+  string explanation = 4;
 }
 
 message UpdateProgressRequest {

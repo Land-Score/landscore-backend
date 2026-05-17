@@ -29,10 +29,9 @@ class PipelineRunner:
         results: dict = {}
 
         for idx, step in enumerate(self.pipeline):
-            pct = int((idx / total) * 100)
+            pct = int(((idx + 1) / total) * 100)
 
             if isinstance(step, ParallelGroup):
-                start = time.monotonic()
                 group_results = await step.run(ctx)
                 for agent, result in zip(step.agents, group_results):
                     if result.success:
@@ -41,10 +40,12 @@ class PipelineRunner:
                     else:
                         # Log but don't abort — partial results are acceptable
                         print(f"[WARN] Agent {agent.name} failed: {result.error}")
+                    if self.on_progress:
+                        await self.on_progress(agent.name, pct, result)
             else:
                 start = time.monotonic()
                 result = await step.run({}, ctx)
-                elapsed = int((time.monotonic() - start) * 1000)
+                result.duration_ms = result.duration_ms or int((time.monotonic() - start) * 1000)
 
                 if result.success:
                     ctx.set(step.name, result.data)

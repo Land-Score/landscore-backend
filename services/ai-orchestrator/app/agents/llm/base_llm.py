@@ -7,6 +7,15 @@ from app import yandex_ai
 
 
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
+RUSSIAN_ONLY_GUARD = """
+
+ОБЯЗАТЕЛЬНО:
+- Отвечай только на русском языке.
+- Не проси у пользователя данные, которые уже есть во входном JSON.
+- Если часть источников недоступна, прямо напиши, какие именно данные недоступны, но не игнорируй доступные факты.
+- Не выдумывай площади, ограничения, почву, инфраструктуру или правовые выводы. Используй только входные данные.
+- Для площадей всегда различай: общая кадастровая площадь, расчетная площадь по геометрии, площадь ограничений, полезная площадь.
+"""
 
 
 class BaseLLMAgent(Agent):
@@ -20,8 +29,8 @@ class BaseLLMAgent(Agent):
         if self.prompt_file:
             path = PROMPTS_DIR / self.prompt_file
             if path.exists():
-                return path.read_text(encoding="utf-8")
-        return f"You are the {self.name} for a land plot analysis system."
+                return path.read_text(encoding="utf-8") + RUSSIAN_ONLY_GUARD
+        return f"Ты агент {self.name} в системе анализа земельных участков LandScore." + RUSSIAN_ONLY_GUARD
 
     async def run(self, input: dict, ctx: AgentContext) -> AgentResult:
         start = time.monotonic()

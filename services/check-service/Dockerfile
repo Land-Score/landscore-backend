@@ -10,10 +10,10 @@ COPY services/check-service/app/ app/
 COPY services/check-service/alembic/ alembic/
 COPY services/check-service/alembic.ini alembic.ini
 COPY services/check-service/start.sh start.sh
-
 COPY proto/ proto/
 COPY scripts/gen_protos.py gen_protos.py
-RUN python gen_protos.py proto app/proto_gen proto/check.proto && chmod +x start.sh
-
+RUN python gen_protos.py proto app/proto_gen proto/check.proto \
+    && sed -i 's/\r$//' start.sh \
+    && chmod +x start.sh
 EXPOSE 50052
-CMD ["./start.sh"]
+CMD ["bash", "start.sh"]

@@ -1,4 +1,4 @@
-"""initial schema
+"""initial search schema
 
 Revision ID: 0001
 Revises:
@@ -16,6 +16,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Idempotent: skip tables that already exist (e.g. created by create_all()
+    # on a previous startup before alembic_version_search was stamped).
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     existing = set(inspector.get_table_names())
@@ -26,25 +28,25 @@ def upgrade() -> None:
             sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
             sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
             sa.Column("status", sa.String(20), nullable=False, server_default="pending"),
-            sa.Column("query", sa.Text(), nullable=False, server_default=""),
-            sa.Column("user_profile_json", postgresql.JSON(), nullable=True),
+            sa.Column("query", sa.String(), nullable=False, server_default=""),
+            sa.Column("user_profile_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
             sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
             sa.Column("completed_at", sa.DateTime(), nullable=True),
         )
         op.create_index("ix_land_searches_user_id", "land_searches", ["user_id"])
+        op.create_index("ix_land_searches_status", "land_searches", ["status"])
 
     if "search_criteria" not in existing:
         op.create_table(
             "search_criteria",
             sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
             sa.Column("search_id", postgresql.UUID(as_uuid=True), nullable=False),
-            sa.Column("criteria_json", postgresql.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column("criteria_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
             sa.Column("confirmed", sa.Boolean(), nullable=False, server_default="false"),
             sa.Column("confirmed_at", sa.DateTime(), nullable=True),
             sa.ForeignKeyConstraint(["search_id"], ["land_searches.id"], ondelete="CASCADE"),
-            sa.UniqueConstraint("search_id", name="uq_search_criteria_search_id"),
         )
-        op.create_index("ix_search_criteria_search_id", "search_criteria", ["search_id"])
+        op.create_index("ix_search_criteria_search_id", "search_criteria", ["search_id"], unique=True)
 
     if "search_steps" not in existing:
         op.create_table(
@@ -59,6 +61,7 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["search_id"], ["land_searches.id"], ondelete="CASCADE"),
         )
         op.create_index("ix_search_steps_search_id", "search_steps", ["search_id"])
+        op.create_index("ix_search_steps_search_id_agent_name", "search_steps", ["search_id", "agent_name"], unique=True)
 
     if "search_candidates" not in existing:
         op.create_table(
@@ -67,35 +70,39 @@ def upgrade() -> None:
             sa.Column("search_id", postgresql.UUID(as_uuid=True), nullable=False),
             sa.Column("plot_id", sa.String(50), nullable=False),
             sa.Column("rank", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("scores_json", postgresql.JSON(), nullable=False, server_default=sa.text("'{}'")),
-            sa.Column("plot_summary_json", postgresql.JSON(), nullable=True),
+            sa.Column("scores_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+            sa.Column("plot_summary_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
             sa.ForeignKeyConstraint(["search_id"], ["land_searches.id"], ondelete="CASCADE"),
         )
         op.create_index("ix_search_candidates_search_id", "search_candidates", ["search_id"])
+        op.create_index("ix_search_candidates_search_id_plot_id", "search_candidates", ["search_id", "plot_id"], unique=True)
 
     if "search_recommendations" not in existing:
         op.create_table(
             "search_recommendations",
             sa.Column("search_id", postgresql.UUID(as_uuid=True), primary_key=True),
-            sa.Column("recommendation_json", postgresql.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column("recommendation_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
             sa.Column(
                 "top_plot_ids",
                 postgresql.ARRAY(sa.String()),
                 nullable=False,
                 server_default=sa.text("'{}'::varchar[]"),
             ),
-            sa.Column("explanation", sa.Text(), nullable=False, server_default=""),
+            sa.Column("explanation", sa.String(), nullable=False, server_default=""),
             sa.ForeignKeyConstraint(["search_id"], ["land_searches.id"], ondelete="CASCADE"),
         )
 
 
 def downgrade() -> None:
     op.drop_table("search_recommendations")
+    op.drop_index("ix_search_candidates_search_id_plot_id", table_name="search_candidates")
     op.drop_index("ix_search_candidates_search_id", table_name="search_candidates")
     op.drop_table("search_candidates")
+    op.drop_index("ix_search_steps_search_id_agent_name", table_name="search_steps")
     op.drop_index("ix_search_steps_search_id", table_name="search_steps")
     op.drop_table("search_steps")
     op.drop_index("ix_search_criteria_search_id", table_name="search_criteria")
     op.drop_table("search_criteria")
+    op.drop_index("ix_land_searches_status", table_name="land_searches")
     op.drop_index("ix_land_searches_user_id", table_name="land_searches")
     op.drop_table("land_searches")

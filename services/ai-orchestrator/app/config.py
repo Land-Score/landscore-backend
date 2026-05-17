@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     yandex_ai_api_key: str = ""
     yandex_ai_folder_id: str = ""
-    yandex_ai_base_url: str = "https://llm.api.cloud.yandex.net/foundationModels/v1"
+    yandex_ai_base_url: str = "https://ai.api.cloud.yandex.net/v1"
     yandex_gpt_model: str = "yandexgpt/latest"
 
     check_grpc: str = "check-service:50052"

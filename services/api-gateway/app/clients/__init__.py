@@ -32,6 +32,8 @@ async def setup_clients(app: FastAPI) -> None:
     import check_pb2_grpc
     import search_pb2_grpc
     import document_pb2_grpc
+    import data_collector_pb2_grpc
+    import geo_pb2_grpc
 
     app.state.auth_channel = grpc.aio.insecure_channel(settings.auth_grpc)
     app.state.auth_stub = auth_pb2_grpc.AuthServiceStub(app.state.auth_channel)
@@ -44,6 +46,12 @@ async def setup_clients(app: FastAPI) -> None:
 
     app.state.document_channel = grpc.aio.insecure_channel(settings.document_grpc)
     app.state.document_stub = document_pb2_grpc.DocumentServiceStub(app.state.document_channel)
+
+    app.state.data_collector_channel = grpc.aio.insecure_channel(settings.data_collector_grpc)
+    app.state.data_collector_stub = data_collector_pb2_grpc.DataCollectorServiceStub(app.state.data_collector_channel)
+
+    app.state.geo_channel = grpc.aio.insecure_channel(settings.geo_grpc)
+    app.state.geo_stub = geo_pb2_grpc.GeoServiceStub(app.state.geo_channel)
 
     # Celery producer — used only for send_task() to ai-orchestrator worker.
     # No task modules imported here; we send by name to avoid coupling.
@@ -59,13 +67,15 @@ async def setup_clients(app: FastAPI) -> None:
         check=settings.check_grpc,
         search=settings.search_grpc,
         document=settings.document_grpc,
+        data_collector=settings.data_collector_grpc,
+        geo=settings.geo_grpc,
         celery_broker=settings.celery_broker_url,
     )
 
 
 async def close_clients(app: FastAPI) -> None:
     """Close all gRPC channels at shutdown."""
-    for name in ("auth_channel", "check_channel", "search_channel", "document_channel"):
+    for name in ("auth_channel", "check_channel", "search_channel", "document_channel", "data_collector_channel", "geo_channel"):
         ch = getattr(app.state, name, None)
         if ch:
             await ch.close()

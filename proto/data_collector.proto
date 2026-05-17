@@ -6,6 +6,8 @@ service DataCollectorService {
   rpc GetPlotByAddress(AddressRequest) returns (PlotDataResponse);
   rpc GetEGRN(EGRNRequest) returns (EGRNResponse);
   rpc SearchPlots(SearchPlotsRequest) returns (SearchPlotsResponse);
+  rpc CollectPlotSpatialLayers(SpatialLayersRequest) returns (SpatialLayersResponse);
+  rpc CollectPlotDataset(CadastralRequest) returns (PlotDatasetResponse);
 }
 
 message CadastralRequest { string cadastral_number = 1; }
@@ -55,4 +57,57 @@ message SearchPlotsRequest {
 message SearchPlotsResponse {
   repeated PlotDataResponse plots = 1;
   int32 total = 2;
+}
+
+message SpatialLayersRequest {
+  string cadastral_number = 1;
+  string parcel_geometry_geojson = 2;
+  repeated string source_layer_keys = 3;
+  bool include_restrictions = 4;
+  bool include_land_use = 5;
+  bool include_real_estate_objects = 6;
+  bool include_informational_layers = 7;
+  bool use_cache = 8;
+  string raw_features_by_layer_json = 9; // Local/offline normalized test input; live collection may ignore it.
+}
+
+message SpatialLayer {
+  string id = 1;
+  string source_layer_key = 2;
+  string source_layer_name = 3;
+  string source_group = 4;
+  string payload_kind = 5; // restriction | land_use | real_estate_object | valuation | info
+  string normalized_type = 6;
+  string label = 7;
+  string geometry_geojson = 8;
+  string source = 9;
+  double confidence = 10;
+  repeated string restrictions = 11;
+  repeated string normative_basis = 12;
+  string properties_json = 13;
+}
+
+message SpatialLayersResponse {
+  string cadastral_number = 1;
+  string parcel_geometry_geojson = 2;
+  repeated SpatialLayer restriction_layers = 3;
+  repeated SpatialLayer land_use_layers = 4;
+  repeated SpatialLayer real_estate_objects = 5;
+  repeated SpatialLayer valuation_layers = 6;
+  repeated SpatialLayer informational_layers = 7;
+  repeated string warnings = 8;
+  string raw_json = 9;
+  bool from_cache = 10;
+}
+
+message PlotDatasetResponse {
+  bool success = 1;
+  string cadastral_number = 2;
+  string nspd_json = 3;
+  string soil_json = 4;
+  string infrastructure_json = 5;
+  string market_json = 6;
+  repeated string warnings = 7;
+  string raw_json = 8;
+  string source = 9;
 }

@@ -45,6 +45,7 @@ message CheckResponse {
   string address = 5;
   string created_at = 6;
   string completed_at = 7;
+  string purpose = 8;
 }
 
 message CheckStatusResponse {

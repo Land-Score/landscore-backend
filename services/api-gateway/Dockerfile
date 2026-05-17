@@ -20,7 +20,9 @@ RUN python gen_protos.py proto app/proto_gen \
     proto/auth.proto \
     proto/check.proto \
     proto/search.proto \
-    proto/document.proto
+    proto/document.proto \
+    proto/data_collector.proto \
+    proto/geo.proto
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

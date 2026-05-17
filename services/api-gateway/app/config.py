@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     check_grpc: str = "check-service:50052"
     search_grpc: str = "search-service:50053"
     document_grpc: str = "document-service:50054"
+    data_collector_grpc: str = "data-collector:50056"
+    geo_grpc: str = "geo-service:50057"
+    cadastral_lookup_timeout: float = 180.0
 
     # Redis broker shared with ai-orchestrator (db=1 for tasks)
     celery_broker_url: str = "redis://redis:6379/1"

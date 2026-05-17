@@ -1,4 +1,6 @@
 """Pydantic request/response models for all API Gateway endpoints."""
+from typing import Any
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -128,7 +130,95 @@ class ListChecksResponse(BaseModel):
     total: int
 
 
+class CadastralLookupRequest(BaseModel):
+    cadastral_number: str = Field(
+        min_length=5,
+        max_length=50,
+        description="Кадастровый номер участка",
+        examples=["26:11:101101:53"],
+    )
+    scenario: str = Field("agriculture", examples=["agriculture"])
+    include_map_analysis: bool = True
+    include_raw: bool = False
+
+
+class CadastralLookupResponse(BaseModel):
+    success: bool
+    cadastral_number: str
+    source: str = ""
+    nspd: dict[str, Any] = Field(default_factory=dict)
+    soil: dict[str, Any] = Field(default_factory=dict)
+    infrastructure: dict[str, Any] = Field(default_factory=dict)
+    market_liquidity: dict[str, Any] = Field(default_factory=dict)
+    geometry_status: str = "unknown"
+    map_summary: dict[str, Any] = Field(default_factory=dict)
+    map: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+
 # ── Searches ─────────────────────────────────────────────────────────────────
+
+class CadastralSpatialLayersRequest(BaseModel):
+    cadastral_number: str = Field(
+        min_length=5,
+        max_length=50,
+        description="Кадастровый номер участка",
+        examples=["26:11:101101:53"],
+    )
+    parcel_geometry: dict[str, Any] | None = Field(
+        None,
+        description="Опционально: GeoJSON geometry участка. Если не передать, data-collector сам получит геометрию по кадастровому номеру.",
+    )
+    source_layer_keys: list[str] = Field(
+        default_factory=list,
+        description="Опциональный список внутренних ключей слоев. Пустой список означает все поддержанные NSPD map layers.",
+        examples=[["buildings", "territorial_zones", "water_boundary_polygon", "heritage_object_territory"]],
+    )
+    include_restrictions: bool = True
+    include_land_use: bool = True
+    include_real_estate_objects: bool = True
+    include_informational_layers: bool = True
+    include_raw: bool = False
+    raw_features_by_layer: dict[str, Any] | None = Field(
+        None,
+        description="Опционально: локальный/offline ввод сырых Feature по layer_key; нужен для тестов без внешнего NSPD.",
+    )
+
+
+class CadastralSpatialLayersResponse(BaseModel):
+    success: bool
+    cadastral_number: str
+    geometry_status: str = "unknown"
+    parcel_geometry: dict[str, Any] = Field(default_factory=dict)
+    restriction_layers: list[dict[str, Any]] = Field(default_factory=list)
+    land_use_layers: list[dict[str, Any]] = Field(default_factory=list)
+    real_estate_objects: list[dict[str, Any]] = Field(default_factory=list)
+    valuation_layers: list[dict[str, Any]] = Field(default_factory=list)
+    informational_layers: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+
+class CadastralMapAnalysisRequest(CadastralSpatialLayersRequest):
+    scenario: str = Field(
+        "agriculture",
+        description="Сценарий для расчета полезной площади: agriculture | rent | construction",
+        examples=["agriculture"],
+    )
+
+
+class CadastralMapAnalysisResponse(BaseModel):
+    success: bool
+    cadastral_number: str
+    scenario: str
+    geometry_status: str = "unknown"
+    summary: dict[str, Any] = Field(default_factory=dict)
+    analysis: dict[str, Any] = Field(default_factory=dict)
+    map: dict[str, Any] = Field(default_factory=dict)
+    spatial_layers: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
 
 class CreateSearchRequest(BaseModel):
     query: str = Field(

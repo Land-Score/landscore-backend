@@ -1,269 +1,257 @@
-import uuid
 import json
-import grpc
-import structlog
+import uuid
 from datetime import datetime
-from sqlalchemy import select, func
+from typing import Any
 
-from google.protobuf import empty_pb2
+import grpc
+from google.protobuf.empty_pb2 import Empty
+from sqlalchemy import desc, func, select
 
 import check_pb2
 import check_pb2_grpc
-
+from app.celery_client import enqueue_check
+from app.constants import CheckStatus, StepStatus
 from app.database import AsyncSessionLocal
-from app.models import LandCheck, CheckStep, CheckResult
-
-log = structlog.get_logger()
+from app.models import CheckResult, CheckStep, LandCheck
 
 
-def _check_resp(c: LandCheck) -> check_pb2.CheckResponse:
+async def _parse_uuid(value: str, field_name: str, context) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except (TypeError, ValueError):
+        await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"invalid {field_name}")
+
+
+def _json_loads(value: str) -> dict[str, Any] | None:
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {"raw": value}
+    return parsed if isinstance(parsed, dict) else {"value": parsed}
+
+
+def _iso(value: datetime | None) -> str:
+    return value.isoformat() if value else ""
+
+
+def _check_response(check: LandCheck) -> check_pb2.CheckResponse:
     return check_pb2.CheckResponse(
-        check_id=str(c.id),
-        user_id=str(c.user_id),
-        status=c.status,
-        cadastral_number=c.cadastral_number or "",
-        address=c.address or "",
-        created_at=c.created_at.isoformat() if c.created_at else "",
-        completed_at=c.completed_at.isoformat() if c.completed_at else "",
+        check_id=str(check.id),
+        user_id=str(check.user_id),
+        status=check.status,
+        cadastral_number=check.cadastral_number or "",
+        address=check.address or "",
+        created_at=_iso(check.created_at),
+        completed_at=_iso(check.completed_at),
+        purpose=check.purpose or "",
     )
 
 
+def _step_duration_ms(step: CheckStep) -> int:
+    if not step.started_at or not step.completed_at:
+        return 0
+    return max(0, int((step.completed_at - step.started_at).total_seconds() * 1000))
+
+
 class CheckServicer(check_pb2_grpc.CheckServiceServicer):
+    """Implements check.proto CheckService."""
 
     async def CreateCheck(self, request, context):
-        if not request.user_id:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "user_id is required")
-            return
-        try:
-            user_uuid = uuid.UUID(request.user_id)
-        except ValueError:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid user_id format")
-            return
+        user_id = await _parse_uuid(request.user_id, "user_id", context)
+        if not request.cadastral_number and not request.address and not (request.lat and request.lng):
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "cadastral_number, address or lat+lng is required",
+            )
 
-        check = LandCheck(
-            id=uuid.uuid4(),
-            user_id=user_uuid,
-            status="pending",
-            cadastral_number=request.cadastral_number or None,
-            address=request.address or None,
-            lat=request.lat if request.lat != 0.0 else None,
-            lng=request.lng if request.lng != 0.0 else None,
-            purpose=request.purpose or "",
-        )
+        async with AsyncSessionLocal() as session:
+            check = LandCheck(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                status=CheckStatus.PENDING,
+                cadastral_number=request.cadastral_number or None,
+                address=request.address or None,
+                lat=request.lat or None,
+                lng=request.lng or None,
+                purpose=request.purpose or "",
+            )
+            session.add(check)
+            await session.commit()
+            await session.refresh(check)
 
-        try:
-            async with AsyncSessionLocal() as session:
-                session.add(check)
+            payload = {
+                "check_id": str(check.id),
+                "user_profile_json": request.user_profile_json or "{}",
+                "cadastral_number": request.cadastral_number or "",
+                "address": request.address or "",
+                "lat": request.lat,
+                "lng": request.lng,
+                "purpose": request.purpose or "",
+            }
+            try:
+                enqueue_check(payload)
+            except Exception as exc:
+                check.status = CheckStatus.FAILED
+                check.completed_at = datetime.utcnow()
                 await session.commit()
-                await session.refresh(check)
+                await context.abort(grpc.StatusCode.UNAVAILABLE, f"failed to enqueue check: {exc}")
 
-            log.info("check_created", check_id=str(check.id))
-            return _check_resp(check)
-        except Exception as exc:
-            log.error("create_check_error", error=str(exc))
-            await context.abort(grpc.StatusCode.INTERNAL, f"DB error: {exc}")
+            return _check_response(check)
 
     async def GetCheck(self, request, context):
-        try:
-            check_uuid = uuid.UUID(request.check_id)
-        except ValueError:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid check_id")
-            return
-
+        check_id = await _parse_uuid(request.check_id, "check_id", context)
         async with AsyncSessionLocal() as session:
-            result = await session.execute(select(LandCheck).where(LandCheck.id == check_uuid))
-            check = result.scalar_one_or_none()
-
-        if not check:
-            await context.abort(grpc.StatusCode.NOT_FOUND, "Check not found")
-            return
-
-        return _check_resp(check)
+            check = await session.get(LandCheck, check_id)
+            if check is None:
+                await context.abort(grpc.StatusCode.NOT_FOUND, "check not found")
+            return _check_response(check)
 
     async def ListChecks(self, request, context):
-        limit = max(1, min(request.limit or 20, 100))
-        offset = max(0, request.offset or 0)
-
-        try:
-            user_uuid = uuid.UUID(request.user_id) if request.user_id else None
-        except ValueError:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid user_id")
-            return
-
+        user_id = await _parse_uuid(request.user_id, "user_id", context)
+        limit = min(max(request.limit or 20, 1), 100)
+        offset = max(request.offset or 0, 0)
         async with AsyncSessionLocal() as session:
-            base = select(LandCheck)
-            count_base = select(func.count()).select_from(LandCheck)
-            if user_uuid:
-                base = base.where(LandCheck.user_id == user_uuid)
-                count_base = count_base.where(LandCheck.user_id == user_uuid)
-
-            rows = await session.execute(
-                base.order_by(LandCheck.created_at.desc()).limit(limit).offset(offset)
+            total = await session.scalar(
+                select(func.count()).select_from(LandCheck).where(LandCheck.user_id == user_id)
             )
-            checks = rows.scalars().all()
-            total = (await session.execute(count_base)).scalar() or 0
-
-        return check_pb2.ListChecksResponse(
-            checks=[_check_resp(c) for c in checks],
-            total=total,
-        )
+            rows = await session.scalars(
+                select(LandCheck)
+                .where(LandCheck.user_id == user_id)
+                .order_by(desc(LandCheck.created_at))
+                .limit(limit)
+                .offset(offset)
+            )
+            return check_pb2.ListChecksResponse(
+                checks=[_check_response(row) for row in rows],
+                total=int(total or 0),
+            )
 
     async def GetCheckStatus(self, request, context):
-        try:
-            check_uuid = uuid.UUID(request.check_id)
-        except ValueError:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid check_id")
-            return
-
+        check_id = await _parse_uuid(request.check_id, "check_id", context)
         async with AsyncSessionLocal() as session:
-            check_row = await session.execute(select(LandCheck).where(LandCheck.id == check_uuid))
-            check = check_row.scalar_one_or_none()
-            if not check:
-                await context.abort(grpc.StatusCode.NOT_FOUND, "Check not found")
-                return
+            check = await session.get(LandCheck, check_id)
+            if check is None:
+                await context.abort(grpc.StatusCode.NOT_FOUND, "check not found")
 
-            steps_row = await session.execute(
-                select(CheckStep)
-                .where(CheckStep.check_id == check_uuid)
-                .order_by(CheckStep.started_at.nullslast())
-            )
-            steps = steps_row.scalars().all()
-
-        current_step = ""
-        progress_pct = 0
-        if steps:
-            latest = steps[-1]
-            current_step = latest.agent_name
-            progress_pct = latest.progress_pct
-
-        return check_pb2.CheckStatusResponse(
-            check_id=str(check.id),
-            status=check.status,
-            current_step=current_step,
-            progress_pct=progress_pct,
-            completed_steps=[
-                check_pb2.StepResult(
-                    agent_name=s.agent_name,
-                    status=s.status,
-                    duration_ms=0,
+            steps = list(
+                await session.scalars(
+                    select(CheckStep)
+                    .where(CheckStep.check_id == check_id)
+                    .order_by(desc(CheckStep.started_at), desc(CheckStep.completed_at))
                 )
-                for s in steps
-                if s.status == "completed"
-            ],
-            error_message="",
-        )
+            )
+            running = next((step for step in steps if step.status == StepStatus.RUNNING), None)
+            latest = steps[0] if steps else None
+            current = running or latest
+            completed = [
+                step
+                for step in steps
+                if step.status in {StepStatus.DONE, StepStatus.FAILED} or step.completed_at is not None
+            ]
+            progress = max([step.progress_pct for step in steps], default=0)
+            if check.status == CheckStatus.COMPLETED:
+                progress = 100
+
+            error_message = ""
+            failed = next((step for step in steps if step.status == StepStatus.FAILED), None)
+            if failed and isinstance(failed.output_json, dict):
+                error_message = str(failed.output_json.get("error") or failed.output_json.get("message") or "")
+
+            return check_pb2.CheckStatusResponse(
+                check_id=str(check.id),
+                status=check.status,
+                current_step=current.agent_name if current else "",
+                progress_pct=progress,
+                completed_steps=[
+                    check_pb2.StepResult(
+                        agent_name=step.agent_name,
+                        status=step.status,
+                        duration_ms=_step_duration_ms(step),
+                    )
+                    for step in completed
+                ],
+                error_message=error_message,
+            )
 
     async def UpdateCheckProgress(self, request, context):
-        try:
-            check_uuid = uuid.UUID(request.check_id)
-        except ValueError:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid check_id")
-            return
+        check_id = await _parse_uuid(request.check_id, "check_id", context)
+        if not request.agent_name:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "agent_name is required")
 
+        now = datetime.utcnow()
         async with AsyncSessionLocal() as session:
-            step_row = await session.execute(
+            check = await session.get(LandCheck, check_id)
+            if check is None:
+                await context.abort(grpc.StatusCode.NOT_FOUND, "check not found")
+
+            step = await session.scalar(
                 select(CheckStep).where(
-                    CheckStep.check_id == check_uuid,
+                    CheckStep.check_id == check_id,
                     CheckStep.agent_name == request.agent_name,
                 )
             )
-            step = step_row.scalar_one_or_none()
-
-            if not step:
+            if step is None:
                 step = CheckStep(
                     id=uuid.uuid4(),
-                    check_id=check_uuid,
+                    check_id=check_id,
                     agent_name=request.agent_name,
-                    started_at=datetime.utcnow(),
+                    started_at=now,
                 )
                 session.add(step)
 
-            step.status = request.status
-            step.progress_pct = request.progress_pct
-            if request.output_json:
-                try:
-                    step.output_json = json.loads(request.output_json)
-                except (json.JSONDecodeError, ValueError):
-                    step.output_json = {"raw": request.output_json}
-            if request.status == "completed":
-                step.completed_at = datetime.utcnow()
+            step.status = request.status or StepStatus.RUNNING
+            step.progress_pct = min(max(request.progress_pct, 0), 100)
+            step.output_json = _json_loads(request.output_json)
+            if step.started_at is None and step.status in {StepStatus.RUNNING, StepStatus.DONE, StepStatus.FAILED}:
+                step.started_at = now
+            if step.status in {StepStatus.DONE, StepStatus.FAILED}:
+                step.completed_at = now
 
-            # Mirror status onto the parent check
-            check_row = await session.execute(select(LandCheck).where(LandCheck.id == check_uuid))
-            check = check_row.scalar_one_or_none()
-            if check and check.status not in ("completed", "failed"):
-                check.status = "processing"
+            if check.status == CheckStatus.PENDING:
+                check.status = CheckStatus.PROCESSING
 
             await session.commit()
-
-        return empty_pb2.Empty()
+            return Empty()
 
     async def SaveCheckResult(self, request, context):
-        try:
-            check_uuid = uuid.UUID(request.check_id)
-        except ValueError:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid check_id")
-            return
-
-        report_data = {}
-        if request.report_json:
-            try:
-                report_data = json.loads(request.report_json)
-            except (json.JSONDecodeError, ValueError):
-                report_data = {"raw": request.report_json}
-
+        check_id = await _parse_uuid(request.check_id, "check_id", context)
+        now = datetime.utcnow()
         async with AsyncSessionLocal() as session:
-            existing_row = await session.execute(
-                select(CheckResult).where(CheckResult.check_id == check_uuid)
-            )
-            result = existing_row.scalar_one_or_none()
+            check = await session.get(LandCheck, check_id)
+            if check is None:
+                await context.abort(grpc.StatusCode.NOT_FOUND, "check not found")
 
-            if not result:
-                result = CheckResult(check_id=check_uuid)
+            result = await session.get(CheckResult, check_id)
+            if result is None:
+                result = CheckResult(check_id=check_id)
                 session.add(result)
 
             result.plot_id = request.plot_id or None
-            result.overall_score = request.overall_score or None
+            result.overall_score = request.overall_score
             result.legal_risk = request.legal_risk or None
             result.stop_factors = list(request.stop_factors)
             result.best_scenario = request.best_scenario or None
-            result.report_json = report_data
-            result.explanation = request.explanation or ""
+            result.report_json = _json_loads(request.report_json) or {}
+            result.explanation = request.explanation or None
             result.next_steps = list(request.next_steps)
 
-            # Mark check as completed
-            check_row = await session.execute(select(LandCheck).where(LandCheck.id == check_uuid))
-            check = check_row.scalar_one_or_none()
-            if check:
-                check.status = "completed"
-                check.completed_at = datetime.utcnow()
-
+            check.status = CheckStatus.COMPLETED
+            check.completed_at = now
             await session.commit()
-
-        log.info("check_result_saved", check_id=str(check_uuid))
-        return empty_pb2.Empty()
+            return Empty()
 
     async def GetCheckReport(self, request, context):
-        try:
-            check_uuid = uuid.UUID(request.check_id)
-        except ValueError:
-            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid check_id")
-            return
-
+        check_id = await _parse_uuid(request.check_id, "check_id", context)
         async with AsyncSessionLocal() as session:
-            check_row = await session.execute(select(LandCheck).where(LandCheck.id == check_uuid))
-            check = check_row.scalar_one_or_none()
-            if not check:
-                await context.abort(grpc.StatusCode.NOT_FOUND, "Check not found")
-                return
+            check = await session.get(LandCheck, check_id)
+            if check is None:
+                await context.abort(grpc.StatusCode.NOT_FOUND, "check not found")
+            result = await session.get(CheckResult, check_id)
 
-            result_row = await session.execute(
-                select(CheckResult).where(CheckResult.check_id == check_uuid)
-            )
-            result = result_row.scalar_one_or_none()
-
-        # Always embed geo metadata so the frontend can render the map
-        # even after a page refresh (sessionStorage is gone but report_json persists).
+        # Always embed geo metadata so the frontend can render the cadastral map
+        # even after a page refresh (sessionStorage is gone, but report_json persists).
         geo_meta = {
             "_coords": {
                 "lat": check.lat,
@@ -273,8 +261,8 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
             }
         }
 
-        if not result:
-            report_str = json.dumps(geo_meta, ensure_ascii=False)
+        if result is None:
+            # Check still processing — return stub with geo coords so the map works
             return check_pb2.CheckReportResponse(
                 check_id=str(check.id),
                 status=check.status,
@@ -282,7 +270,7 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
                 legal_risk="",
                 stop_factors=[],
                 best_scenario="",
-                report_json=report_str,
+                report_json=json.dumps(geo_meta, ensure_ascii=False),
                 explanation="",
                 next_steps=[],
             )

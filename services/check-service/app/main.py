@@ -1,6 +1,6 @@
 import asyncio
-import sys
 import os
+import sys
 from concurrent import futures
 
 # Ensure proto_gen stubs are importable before any other app import
@@ -21,7 +21,7 @@ log = structlog.get_logger()
 
 
 async def init_db() -> None:
-    """Create tables if they don't exist (idempotent)."""
+    """Create tables if they don't exist (idempotent fallback after alembic)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     log.info("check_db_initialized")

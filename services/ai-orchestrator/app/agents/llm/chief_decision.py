@@ -34,6 +34,7 @@ class ChiefDecisionAgent(BaseLLMAgent):
         return json.dumps({
             "profile": ctx.profile.__dict__,
             "plot_summary": ctx.plot.__dict__,
+            "map_summary": ctx.get("map_summary") or ctx.get("GeoAgent", {}).get("map_summary"),
             "legal": ctx.get("LegalAgent"),
             "land_use": ctx.get("LandUseAgent"),
             "restrictions": ctx.get("RestrictionsAgent"),

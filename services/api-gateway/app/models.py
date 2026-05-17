@@ -137,6 +137,9 @@ class CadastralLookupRequest(BaseModel):
         description="Кадастровый номер участка",
         examples=["26:11:101101:53"],
     )
+    scenario: str = Field("agriculture", examples=["agriculture"])
+    include_map_analysis: bool = True
+    include_raw: bool = False
 
 
 class CadastralLookupResponse(BaseModel):
@@ -147,6 +150,9 @@ class CadastralLookupResponse(BaseModel):
     soil: dict[str, Any] = Field(default_factory=dict)
     infrastructure: dict[str, Any] = Field(default_factory=dict)
     market_liquidity: dict[str, Any] = Field(default_factory=dict)
+    geometry_status: str = "unknown"
+    map_summary: dict[str, Any] = Field(default_factory=dict)
+    map: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
 
@@ -173,6 +179,7 @@ class CadastralSpatialLayersRequest(BaseModel):
     include_land_use: bool = True
     include_real_estate_objects: bool = True
     include_informational_layers: bool = True
+    include_raw: bool = False
     raw_features_by_layer: dict[str, Any] | None = Field(
         None,
         description="Опционально: локальный/offline ввод сырых Feature по layer_key; нужен для тестов без внешнего NSPD.",
@@ -182,6 +189,7 @@ class CadastralSpatialLayersRequest(BaseModel):
 class CadastralSpatialLayersResponse(BaseModel):
     success: bool
     cadastral_number: str
+    geometry_status: str = "unknown"
     parcel_geometry: dict[str, Any] = Field(default_factory=dict)
     restriction_layers: list[dict[str, Any]] = Field(default_factory=list)
     land_use_layers: list[dict[str, Any]] = Field(default_factory=list)
@@ -204,6 +212,8 @@ class CadastralMapAnalysisResponse(BaseModel):
     success: bool
     cadastral_number: str
     scenario: str
+    geometry_status: str = "unknown"
+    summary: dict[str, Any] = Field(default_factory=dict)
     analysis: dict[str, Any] = Field(default_factory=dict)
     map: dict[str, Any] = Field(default_factory=dict)
     spatial_layers: dict[str, Any] = Field(default_factory=dict)

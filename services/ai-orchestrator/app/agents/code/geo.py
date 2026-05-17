@@ -59,6 +59,47 @@ def _to_geo_real_estate_object(layer: dict) -> dict:
     }
 
 
+def _top_restrictions(layers: list[dict], limit: int = 5) -> list[dict]:
+    def _num(value) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    visible = [layer for layer in layers if layer.get("show_in_report", True)]
+    visible.sort(
+        key=lambda layer: (_num(layer.get("counted_in_loss_ha")), _num(layer.get("intersection_ha"))),
+        reverse=True,
+    )
+    return [
+        {
+            "id": layer.get("id", ""),
+            "label": layer.get("label", ""),
+            "name": layer.get("name", ""),
+            "severity": layer.get("severity", ""),
+            "area_loss_mode": layer.get("area_loss_mode", ""),
+            "intersection_ha": layer.get("intersection_ha", 0),
+            "counted_in_loss_ha": layer.get("counted_in_loss_ha", 0),
+        }
+        for layer in visible[:limit]
+    ]
+
+
+def _map_summary(analysis: dict, scenario: str) -> dict:
+    layers = analysis.get("layers", [])
+    return {
+        "geometry_status": "present",
+        "scenario": analysis.get("scenario") or scenario,
+        "parcel_area_ha": analysis.get("parcel_area_ha"),
+        "restricted_area_ha": analysis.get("restricted_area_ha"),
+        "usable_area_ha": analysis.get("usable_area_ha"),
+        "loss_percent": analysis.get("loss_percent"),
+        "top_restrictions": _top_restrictions(layers),
+        "land_use_composition": analysis.get("land_use_composition", []),
+        "child_real_estate_objects_count": len(analysis.get("child_real_estate_objects", [])),
+    }
+
+
 class GeoAgent(Agent):
     name = "GeoAgent"
 
@@ -66,6 +107,14 @@ class GeoAgent(Agent):
         spatial_layers = ctx.get("spatial_layers") or ctx.get("DataRequestAgent", {}).get("spatial_layers")
         parcel_geometry_geojson = ctx.get("parcel_geometry_geojson") or (spatial_layers or {}).get("parcel_geometry_geojson", "")
         if not spatial_layers or not parcel_geometry_geojson:
+            ctx.set("map_summary", {
+                "geometry_status": "missing",
+                "parcel_area_ha": None,
+                "restricted_area_ha": None,
+                "usable_area_ha": None,
+                "loss_percent": None,
+                "top_restrictions": [],
+            })
             return AgentResult(
                 success=True,
                 data={
@@ -102,6 +151,8 @@ class GeoAgent(Agent):
             return AgentResult(success=False, data={}, error=f"Geo Service restriction analysis failed: {exc}")
 
         ctx.set("geo_analysis", analysis)
+        summary = _map_summary(analysis, scenario)
+        ctx.set("map_summary", summary)
         return AgentResult(
             success=True,
             data={
@@ -110,6 +161,7 @@ class GeoAgent(Agent):
                 "restricted_area_ha": analysis.get("restricted_area_ha", 0),
                 "usable_area_ha": analysis.get("usable_area_ha", 0),
                 "loss_percent": analysis.get("loss_percent", 0),
+                "map_summary": summary,
                 "analysis": analysis,
             },
         )

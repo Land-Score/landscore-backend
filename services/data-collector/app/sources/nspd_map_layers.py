@@ -27,6 +27,8 @@ NSPD_LAYER_SOURCES: dict[str, NspdLayerSource] = {
     "enterprise_property_complex": NspdLayerSource("enterprise_property_complex", 39664),
     "cultural_heritage_zouit": NspdLayerSource("cultural_heritage_zouit", 36940),
     "energy_transport_zouit": NspdLayerSource("energy_transport_zouit", 36940),
+    "water_protection_zone": NspdLayerSource("water_protection_zone", 36940),
+    "coastal_protective_strip": NspdLayerSource("coastal_protective_strip", 36940),
     "natural_area_zouit": NspdLayerSource("natural_area_zouit", 36940),
     "security_zouit": NspdLayerSource("security_zouit", 36940),
     "other_zouit": NspdLayerSource("other_zouit", 36940),
@@ -108,6 +110,10 @@ def _first_requested(candidates: tuple[str, ...], requested_keys: set[str]) -> s
 def _classify_zouit_feature(text: str, requested_keys: set[str]) -> str:
     if "культур" in text:
         return _first_requested(("cultural_heritage_zouit", "other_zouit"), requested_keys) or "cultural_heritage_zouit"
+    if "водоохран" in text:
+        return _first_requested(("water_protection_zone", "natural_area_zouit", "other_zouit"), requested_keys) or "water_protection_zone"
+    if "прибреж" in text:
+        return _first_requested(("coastal_protective_strip", "natural_area_zouit", "other_zouit"), requested_keys) or "coastal_protective_strip"
     if any(token in text for token in ("природ", "санитар", "водоохран", "прибреж", "курорт")):
         return _first_requested(("natural_area_zouit", "other_zouit"), requested_keys) or "natural_area_zouit"
     if any(token in text for token in ("энергет", "транспорт", "связ", "электр", "газопровод", "линия электропередач")):

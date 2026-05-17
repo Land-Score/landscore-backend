@@ -48,7 +48,7 @@ class SearchServicer:
 
     async def SaveCandidate(self, request, context):
         # Called by ai-orchestrator as each candidate is scored
-        # Insert/update SearchCandidate with rank + scores_json
+        # Insert/update SearchCandidate with rank, scores_json and compact plot_summary_json
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
 
     async def UpdateSearchProgress(self, request, context):

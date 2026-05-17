@@ -72,6 +72,7 @@ message SaveCandidateRequest {
   string plot_id = 2;
   int32 rank = 3;
   string scores_json = 4;
+  string plot_summary_json = 5;
 }
 
 message UpdateProgressRequest {

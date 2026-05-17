@@ -14,6 +14,8 @@ def test_layer_classification() -> None:
     requested = {
         "cultural_heritage_zouit",
         "energy_transport_zouit",
+        "water_protection_zone",
+        "coastal_protective_strip",
         "natural_area_zouit",
         "water_erosion",
         "linear_erosion",
@@ -24,7 +26,8 @@ def test_layer_classification() -> None:
 
     assert classify_layer_key({"properties": {"name": "ЗОУИТ объекта культурного наследия"}}, 36940, requested) == "cultural_heritage_zouit"
     assert classify_layer_key({"properties": {"name": "Охранная зона линии электропередач"}}, 36940, requested) == "energy_transport_zouit"
-    assert classify_layer_key({"properties": {"name_by_doc": "Прибрежная защитная полоса балки Свистунова", "content": "движение транспортных средств запрещается"}}, 36940, requested) == "natural_area_zouit"
+    assert classify_layer_key({"properties": {"name_by_doc": "Водоохранная зона балки Свистунова"}}, 36940, requested) == "water_protection_zone"
+    assert classify_layer_key({"properties": {"name_by_doc": "Прибрежная защитная полоса балки Свистунова", "content": "движение транспортных средств запрещается"}}, 36940, requested) == "coastal_protective_strip"
     assert classify_layer_key({"properties": {"name": "Линейная эрозия"}}, 38967, requested) == "linear_erosion"
     assert classify_layer_key({"properties": {"name": "Водная эрозия"}}, 38967, requested) == "water_erosion"
     assert classify_layer_key({"properties": {"name": "Зона затопления"}}, 38967, requested) == "flooding"
@@ -40,6 +43,8 @@ def test_layer_selection_flags() -> None:
         include_informational_layers=False,
     )
     assert "water_boundary_polygon" in selected
+    assert "water_protection_zone" in selected
+    assert "coastal_protective_strip" in selected
     assert "buildings" not in selected
     assert "special_economic_zone" not in selected
 

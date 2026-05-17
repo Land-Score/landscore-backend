@@ -59,6 +59,11 @@ class DataCollectorServiceStub(object):
                 request_serializer=data__collector__pb2.SpatialLayersRequest.SerializeToString,
                 response_deserializer=data__collector__pb2.SpatialLayersResponse.FromString,
                 _registered_method=True)
+        self.CollectPlotDataset = channel.unary_unary(
+                '/data_collector.DataCollectorService/CollectPlotDataset',
+                request_serializer=data__collector__pb2.CadastralRequest.SerializeToString,
+                response_deserializer=data__collector__pb2.PlotDatasetResponse.FromString,
+                _registered_method=True)
 
 
 class DataCollectorServiceServicer(object):
@@ -94,6 +99,12 @@ class DataCollectorServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CollectPlotDataset(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DataCollectorServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -121,6 +132,11 @@ def add_DataCollectorServiceServicer_to_server(servicer, server):
                     servicer.CollectPlotSpatialLayers,
                     request_deserializer=data__collector__pb2.SpatialLayersRequest.FromString,
                     response_serializer=data__collector__pb2.SpatialLayersResponse.SerializeToString,
+            ),
+            'CollectPlotDataset': grpc.unary_unary_rpc_method_handler(
+                    servicer.CollectPlotDataset,
+                    request_deserializer=data__collector__pb2.CadastralRequest.FromString,
+                    response_serializer=data__collector__pb2.PlotDatasetResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -258,6 +274,33 @@ class DataCollectorService(object):
             '/data_collector.DataCollectorService/CollectPlotSpatialLayers',
             data__collector__pb2.SpatialLayersRequest.SerializeToString,
             data__collector__pb2.SpatialLayersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CollectPlotDataset(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/data_collector.DataCollectorService/CollectPlotDataset',
+            data__collector__pb2.CadastralRequest.SerializeToString,
+            data__collector__pb2.PlotDatasetResponse.FromString,
             options,
             channel_credentials,
             insecure,

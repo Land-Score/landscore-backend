@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     search_grpc: str = "search-service:50053"
     document_grpc: str = "document-service:50054"
 
+    # Redis broker shared with ai-orchestrator (db=1 for tasks)
+    celery_broker_url: str = "redis://redis:6379/1"
+
     allowed_origins: list[str] = ["http://localhost:3000"]
     rate_limit_per_minute: int = 60
 

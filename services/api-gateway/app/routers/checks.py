@@ -78,9 +78,27 @@ async def create_check(body: CreateCheckRequest, request: Request) -> CheckItemR
             purpose=body.purpose,
             user_profile_json=user_profile_json,
         ))
-        return _check_item(resp)
     except grpc.RpcError as e:
         raise_for_grpc(e)
+
+    # Dispatch the AI pipeline to ai-orchestrator Celery worker.
+    # send_task() publishes by name without importing the task module —
+    # the worker picks it up and runs the check pipeline asynchronously.
+    import asyncio
+    await asyncio.to_thread(
+        request.app.state.celery.send_task,
+        "run_check",
+        args=[{
+            "check_id": resp.check_id,
+            "cadastral_number": body.cadastral_number or "",
+            "address": body.address or "",
+            "lat": body.lat or 0.0,
+            "lng": body.lng or 0.0,
+            "user_profile_json": user_profile_json,
+        }],
+    )
+
+    return _check_item(resp)
 
 
 @router.get(

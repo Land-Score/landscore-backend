@@ -63,9 +63,22 @@ async def create_search(body: CreateSearchRequest, request: Request) -> SearchIt
             query=body.query,
             user_profile_json=user_profile_json,
         ))
-        return _search_item(resp)
     except grpc.RpcError as e:
         raise_for_grpc(e)
+
+    # Dispatch the AI search pipeline to ai-orchestrator Celery worker.
+    import asyncio
+    await asyncio.to_thread(
+        request.app.state.celery.send_task,
+        "run_search",
+        args=[{
+            "search_id": resp.search_id,
+            "query": body.query,
+            "user_profile_json": user_profile_json,
+        }],
+    )
+
+    return _search_item(resp)
 
 
 @router.get(

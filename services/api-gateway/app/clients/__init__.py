@@ -17,6 +17,7 @@ if _proto_gen not in sys.path:
 
 import grpc  # noqa: E402
 import structlog  # noqa: E402
+from celery import Celery  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 
 from app.config import settings  # noqa: E402
@@ -44,12 +45,21 @@ async def setup_clients(app: FastAPI) -> None:
     app.state.document_channel = grpc.aio.insecure_channel(settings.document_grpc)
     app.state.document_stub = document_pb2_grpc.DocumentServiceStub(app.state.document_channel)
 
+    # Celery producer — used only for send_task() to ai-orchestrator worker.
+    # No task modules imported here; we send by name to avoid coupling.
+    app.state.celery = Celery(broker=settings.celery_broker_url)
+    app.state.celery.conf.update(
+        task_serializer="json",
+        accept_content=["json"],
+    )
+
     log.info(
         "grpc_clients_initialized",
         auth=settings.auth_grpc,
         check=settings.check_grpc,
         search=settings.search_grpc,
         document=settings.document_grpc,
+        celery_broker=settings.celery_broker_url,
     )
 
 

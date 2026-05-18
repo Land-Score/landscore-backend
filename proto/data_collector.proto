@@ -98,6 +98,9 @@ message SpatialLayersResponse {
   repeated string warnings = 8;
   string raw_json = 9;
   bool from_cache = 10;
+  repeated SpatialLayer child_real_estate_objects = 11;
+  repeated SpatialLayer land_parts = 12;
+  string land_composition_json = 13;
 }
 
 message PlotDatasetResponse {

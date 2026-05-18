@@ -13,9 +13,12 @@ from app.models import (
     CadastralLookupResponse,
     CadastralMapAnalysisRequest,
     CadastralMapAnalysisResponse,
+    CadastralPriceAnalysisRequest,
+    CadastralPriceAnalysisResponse,
     CadastralSpatialLayersRequest,
     CadastralSpatialLayersResponse,
 )
+from app.price_analysis import build_price_analysis_async
 
 router = APIRouter()
 
@@ -55,6 +58,16 @@ def _json_dict(value: str) -> dict[str, Any]:
         return {}
 
 
+def _json_list(value: str) -> list[Any]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
 def _layer_properties(layer) -> dict[str, Any]:
     return _json_dict(getattr(layer, "properties_json", "") or "{}")
 
@@ -92,6 +105,13 @@ def _to_float(value: Any) -> float:
         return 0.0
 
 
+def _valid_geometry_json_string(value: str) -> str:
+    geometry = _json_dict(value)
+    if geometry.get("type") and (geometry.get("coordinates") or geometry.get("geometries")):
+        return value
+    return ""
+
+
 def _to_geo_real_estate_object(layer) -> dict[str, Any]:
     props = _layer_properties(layer)
     area = props.get("area") or props.get("specified_area") or props.get("declared_area") or 0
@@ -100,7 +120,7 @@ def _to_geo_real_estate_object(layer) -> dict[str, Any]:
         "object_type": props.get("objectType") or layer.normalized_type or "unknown",
         "name": layer.label or layer.source_layer_name,
         "area_sqm": _to_float(area),
-        "geometry_geojson": layer.geometry_geojson,
+        "geometry_geojson": _valid_geometry_json_string(layer.geometry_geojson),
         "properties_json": layer.properties_json,
     }
 
@@ -371,10 +391,87 @@ def _spatial_counts(spatial_response) -> dict[str, Any]:
         "restriction_layers_count": len(spatial_response.restriction_layers),
         "land_use_layers_count": len(spatial_response.land_use_layers),
         "real_estate_objects_count": len(spatial_response.real_estate_objects),
+        "child_real_estate_objects_count": len(spatial_response.child_real_estate_objects),
+        "land_parts_count": len(spatial_response.land_parts),
         "valuation_layers_count": len(spatial_response.valuation_layers),
         "informational_layers_count": len(spatial_response.informational_layers),
         "warnings": list(spatial_response.warnings),
     }
+
+
+def _spatial_layer_to_map_feature(layer, *, layer_type: str, label: str, color: str, include_raw: bool) -> dict[str, Any] | None:
+    geometry = _geometry_to_wgs84(_json_dict(layer.geometry_geojson))
+    if not geometry.get("type"):
+        return None
+    properties = _json_dict(layer.properties_json)
+    style = _map_style({"fill": color, "stroke": color, "opacity": 0.28})
+    public_properties = {
+        "id": layer.id,
+        "layerType": layer_type,
+        "label": label,
+        "cadastralNumber": properties.get("cadastralNumber") or properties.get("cad_num") or "",
+        "style": style,
+    }
+    if include_raw:
+        public_properties.update(properties)
+    return {
+        "type": "Feature",
+        "id": layer.id,
+        "geometry": geometry,
+        "properties": public_properties,
+    }
+
+
+def _extend_map_payload_with_spatial_children(
+    map_payload: dict[str, Any],
+    spatial_response,
+    *,
+    include_raw: bool,
+) -> dict[str, Any]:
+    features = list(((map_payload.get("feature_collection") or {}).get("features") or []))
+    extra_features: list[dict[str, Any]] = []
+    for layer in spatial_response.child_real_estate_objects:
+        feature = _spatial_layer_to_map_feature(
+            layer,
+            layer_type="child_real_estate_object",
+            label="Объект недвижимости",
+            color="#8b5cf6",
+            include_raw=include_raw,
+        )
+        if feature:
+            extra_features.append(feature)
+    for layer in spatial_response.land_parts:
+        feature = _spatial_layer_to_map_feature(
+            layer,
+            layer_type="land_part",
+            label="Часть земельного участка",
+            color="#f97316",
+            include_raw=include_raw,
+        )
+        if feature:
+            extra_features.append(feature)
+
+    if not extra_features:
+        return map_payload
+
+    features.extend(extra_features)
+    bbox = _feature_collection_bbox(features)
+    feature_collection = {"type": "FeatureCollection", "features": features}
+    if bbox:
+        feature_collection["bbox"] = bbox
+    map_payload["feature_collection"] = feature_collection
+    map_payload["bbox"] = bbox
+    map_payload["layers"] = [
+        {
+            "id": feature.get("id"),
+            "layer_type": feature.get("properties", {}).get("layerType"),
+            "label": feature.get("properties", {}).get("label"),
+            "style": feature.get("properties", {}).get("style", {}),
+            "feature": feature,
+        }
+        for feature in features
+    ]
+    return map_payload
 
 
 async def _collect_spatial_layers(body: CadastralSpatialLayersRequest, request: Request):
@@ -431,7 +528,7 @@ async def _run_map_analysis(
         ],
         real_estate_objects=[
             geo_pb2.RealEstateObjectLayer(**_to_geo_real_estate_object(layer))
-            for layer in spatial_response.real_estate_objects
+            for layer in [*spatial_response.real_estate_objects, *spatial_response.child_real_estate_objects]
         ],
     )
 
@@ -445,6 +542,11 @@ async def _run_map_analysis(
 
     analysis = _geo_response_to_dict(geo_response, include_raw=body.include_raw)
     map_payload = _map_response_from_geo(geo_response, include_raw=body.include_raw)
+    map_payload = _extend_map_payload_with_spatial_children(
+        map_payload,
+        spatial_response,
+        include_raw=body.include_raw,
+    )
     summary = _analysis_summary(analysis, geometry_status=geometry_status)
     warnings = [*list(spatial_response.warnings), *list(geo_response.warnings)]
     return True, geometry_status, summary, analysis, map_payload, spatial_summary, warnings
@@ -524,6 +626,69 @@ async def lookup_cadastral_plot(body: CadastralLookupRequest, request: Request) 
 
 
 @router.post(
+    "/price-analysis",
+    response_model=CadastralPriceAnalysisResponse,
+    summary="Посмотреть кадастровую цену и похожие рыночные сигналы (временно отключено)",
+    description=(
+        "Сервис временно залочен: автоматический поиск рыночных аналогов требует доработки источников "
+        "и фильтрации. Ручка оставлена в контракте, но возвращает 501 PRICE_ANALYSIS_DISABLED."
+    ),
+)
+async def analyze_cadastral_price(
+    body: CadastralPriceAnalysisRequest,
+    request: Request,
+) -> CadastralPriceAnalysisResponse:
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "code": "PRICE_ANALYSIS_DISABLED",
+            "message": "Price analysis is temporarily disabled until market comparable search is reworked.",
+        },
+    )
+
+    cadastral_number = body.cadastral_number.strip()
+    if not _CADASTRAL_NUMBER_RE.match(cadastral_number):
+        raise HTTPException(status_code=400, detail="Кадастровый номер должен быть в формате 26:11:101101:53")
+
+    import data_collector_pb2
+
+    try:
+        response = await request.app.state.data_collector_stub.CollectPlotDataset(
+            data_collector_pb2.CadastralRequest(cadastral_number=cadastral_number),
+            timeout=settings.cadastral_lookup_timeout,
+        )
+    except grpc.RpcError as exc:
+        raise_for_grpc(exc)
+
+    try:
+        nspd = _loads(response.nspd_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=502, detail=f"data-collector returned invalid NSPD JSON: {exc}") from exc
+
+    price_analysis = await build_price_analysis_async(
+        cadastral_number=cadastral_number,
+        nspd=nspd,
+        manual_candidates=body.manual_candidates,
+        max_items=body.max_items,
+    )
+    raw = {"nspd": nspd, "data_collector_raw": _loads(response.raw_json)} if body.include_raw else {}
+    return CadastralPriceAnalysisResponse(
+        success=bool(response.success and price_analysis.get("success")),
+        cadastral_number=response.cadastral_number or cadastral_number,
+        cadastral_price_summary=price_analysis.get("cadastral_price_summary", {}),
+        score_summary=price_analysis.get("score_summary", {}),
+        similar_plots=price_analysis.get("similar_plots", []),
+        signals=price_analysis.get("signals", []),
+        excluded=price_analysis.get("excluded", []),
+        subject=price_analysis.get("subject", {}),
+        diagnostics=price_analysis.get("diagnostics", []),
+        warnings=[*list(response.warnings), *price_analysis.get("warnings", [])],
+        limitations=price_analysis.get("limitations", []),
+        raw=raw,
+    )
+
+
+@router.post(
     "/spatial-layers",
     response_model=CadastralSpatialLayersResponse,
     summary="Проверить слои карты NSPD по кадастровому номеру",
@@ -556,6 +721,9 @@ async def collect_cadastral_spatial_layers(
             restriction_layers=[_layer_to_dict(layer) for layer in response.restriction_layers],
             land_use_layers=[_layer_to_dict(layer) for layer in response.land_use_layers],
             real_estate_objects=[_layer_to_dict(layer) for layer in response.real_estate_objects],
+            child_real_estate_objects=[_layer_to_dict(layer) for layer in response.child_real_estate_objects],
+            land_parts=[_layer_to_dict(layer) for layer in response.land_parts],
+            land_composition=_json_list(response.land_composition_json),
             valuation_layers=[_layer_to_dict(layer) for layer in response.valuation_layers],
             informational_layers=[_layer_to_dict(layer) for layer in response.informational_layers],
             warnings=list(response.warnings),

@@ -131,6 +131,8 @@ class DataRequestAgent(Agent):
                 "restriction_layers_count": len(spatial_layers.get("restriction_layers", [])),
                 "land_use_layers_count": len(spatial_layers.get("land_use_layers", [])),
                 "real_estate_objects_count": len(spatial_layers.get("real_estate_objects", [])),
+                "child_real_estate_objects_count": len(spatial_layers.get("child_real_estate_objects", [])),
+                "land_parts_count": len(spatial_layers.get("land_parts", [])),
                 "spatial_layers": spatial_layers,
                 "warnings": warnings + spatial_warnings,
             },

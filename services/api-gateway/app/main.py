@@ -169,6 +169,7 @@ _PUBLIC_PATHS = {
     "/api/auth/login",
     "/api/auth/refresh",
     "/api/cadastral/lookup",
+    "/api/cadastral/price-analysis",
     "/api/alice/webhook",
 }
 

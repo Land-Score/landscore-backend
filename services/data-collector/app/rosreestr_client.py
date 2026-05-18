@@ -367,6 +367,9 @@ class RealRosreestrClient:
                     f"/geoportal/v2/search/geoportal?thematicSearchId=1&query={query}&CRS=EPSG:3857",
                     f"/geoportal/v2/search/geoportal?query={query}&CRS=EPSG:3857",
                     f"/geoportal/v1/search/geoportal?thematicSearchId=1&query={query}&CRS=EPSG:3857",
+                    f"/geoportal/v2/search/geoportal?thematicSearchId=1&query={query}",
+                    f"/geoportal/v2/search/geoportal?query={query}",
+                    f"/geoportal/v1/search/geoportal?thematicSearchId=1&query={query}",
                 ),
             )
 

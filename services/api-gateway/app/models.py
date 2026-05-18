@@ -157,6 +157,44 @@ class CadastralLookupResponse(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
+class CadastralPriceAnalysisRequest(BaseModel):
+    cadastral_number: str = Field(
+        min_length=5,
+        max_length=50,
+        description="Кадастровый номер участка",
+        examples=["26:11:101101:53"],
+    )
+    max_items: int = Field(
+        20,
+        ge=1,
+        le=50,
+        description="Сколько похожих объектов/сигналов вернуть в каждой группе",
+    )
+    include_raw: bool = False
+    manual_candidates: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Optional known analogs for calibration. Each item can contain: "
+            "title, url, price_rub, area_ha, area_sqm, deal_type, description."
+        ),
+    )
+
+
+class CadastralPriceAnalysisResponse(BaseModel):
+    success: bool
+    cadastral_number: str
+    cadastral_price_summary: dict[str, Any] = Field(default_factory=dict)
+    score_summary: dict[str, Any] = Field(default_factory=dict)
+    similar_plots: list[dict[str, Any]] = Field(default_factory=list)
+    signals: list[dict[str, Any]] = Field(default_factory=list)
+    excluded: list[dict[str, Any]] = Field(default_factory=list)
+    subject: dict[str, Any] = Field(default_factory=dict)
+    diagnostics: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+
 # ── Searches ─────────────────────────────────────────────────────────────────
 
 class CadastralSpatialLayersRequest(BaseModel):
@@ -194,6 +232,9 @@ class CadastralSpatialLayersResponse(BaseModel):
     restriction_layers: list[dict[str, Any]] = Field(default_factory=list)
     land_use_layers: list[dict[str, Any]] = Field(default_factory=list)
     real_estate_objects: list[dict[str, Any]] = Field(default_factory=list)
+    child_real_estate_objects: list[dict[str, Any]] = Field(default_factory=list)
+    land_parts: list[dict[str, Any]] = Field(default_factory=list)
+    land_composition: list[dict[str, Any]] = Field(default_factory=list)
     valuation_layers: list[dict[str, Any]] = Field(default_factory=list)
     informational_layers: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

@@ -11,7 +11,7 @@ import httpx
 from app.config import settings
 from app.dataset_pipeline import DataCollectionPipeline, dataset_response_dict
 from app.rosreestr_client import egrn_to_dict, get_client, plot_to_dict
-from app.sources.nspd_map_layers import NspdMapLayerClient, parcel_geometry_from_plot_raw
+from app.sources.nspd_map_layers import NspdChildObjectClient, NspdMapLayerClient, parcel_geometry_from_plot_raw
 from app.spatial_collector import SpatialLayerCollector, collected_spatial_data_to_dict
 
 PROTO_GEN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "proto_gen"))
@@ -115,6 +115,7 @@ class DataCollectorServicer:
         raw_source = "nspd"
 
         parcel_geometry = None
+        plot = None
         parcel_raw = getattr(request, "parcel_geometry_geojson", "") or ""
         if parcel_raw:
             try:
@@ -156,6 +157,22 @@ class DataCollectorServicer:
             parcel_geometry=parcel_geometry,
             source=raw_source,
         )
+
+        if settings.rosreestr_mode.lower() == "real" and getattr(request, "include_real_estate_objects", False):
+            try:
+                if plot is None:
+                    plot = await get_client().get_plot(request.cadastral_number)
+                child_objects, land_parts, land_composition, child_warnings = await NspdChildObjectClient().collect_for_plot(
+                    cadastral_number=request.cadastral_number,
+                    plot_raw_json=plot.raw_json,
+                )
+                data.child_real_estate_objects.extend(child_objects)
+                data.land_parts.extend(land_parts)
+                data.land_composition.extend(land_composition)
+                warnings.extend(child_warnings)
+            except Exception as exc:
+                warnings.append(f"nspd_child_tabs_failed:{exc}")
+
         data.warnings.extend(warnings)
         return _message_or_dict("SpatialLayersResponse", collected_spatial_data_to_dict(data))
 

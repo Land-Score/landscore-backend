@@ -15,6 +15,7 @@ _PUBLIC = {
     "/api/cadastral/lookup",
     "/api/cadastral/spatial-layers",
     "/api/cadastral/map-analysis",
+    "/api/cadastral/price-analysis",
     "/api/alice/webhook",
 }
 
@@ -25,6 +26,9 @@ _PUBLIC_PREFIXES = ("/docs/", "/redoc/")
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+
+        if request.method == "OPTIONS":
+            return await call_next(request)
 
         if path in _PUBLIC or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
             return await call_next(request)

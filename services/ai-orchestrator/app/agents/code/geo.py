@@ -73,7 +73,7 @@ def _to_geo_real_estate_object(layer: dict) -> dict:
         "object_type": props.get("objectType") or layer.get("normalized_type") or "unknown",
         "name": layer.get("label") or layer.get("source_layer_name", ""),
         "area_sqm": area_sqm,
-        "geometry_geojson": layer.get("geometry_geojson", "{}"),
+        "geometry_geojson": layer.get("geometry_geojson", "{}") if _valid_geometry_json(layer.get("geometry_geojson", "{}")) else "",
         "properties_json": layer.get("properties_json", "{}"),
     }
 
@@ -162,7 +162,10 @@ class GeoAgent(Agent):
                 ],
                 real_estate_objects=[
                     _to_geo_real_estate_object(layer)
-                    for layer in spatial_layers.get("real_estate_objects", [])
+                    for layer in [
+                        *spatial_layers.get("real_estate_objects", []),
+                        *spatial_layers.get("child_real_estate_objects", []),
+                    ]
                 ],
                 vision_interpretation_json=ctx.get("vision_interpretation_json", ""),
             )

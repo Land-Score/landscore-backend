@@ -36,6 +36,84 @@ def _iso(value: datetime | None) -> str:
     return value.isoformat() if value else ""
 
 
+def _compact_layer_for_client(layer: Any) -> dict[str, Any] | None:
+    if not isinstance(layer, dict):
+        return None
+    compact: dict[str, Any] = {}
+    for key in (
+        "id",
+        "layer_type",
+        "normalized_type",
+        "label",
+        "name",
+        "source",
+        "source_layer_name",
+        "geometry_geojson",
+        "intersection_ha",
+        "counted_in_loss_ha",
+        "area_loss_mode",
+        "severity",
+    ):
+        value = layer.get(key)
+        if value not in (None, "", [], {}):
+            compact[key] = value
+    return compact or None
+
+
+def _compact_layers_for_client(layers: Any, *, limit: int | None = None) -> list[dict[str, Any]]:
+    if not isinstance(layers, list):
+        return []
+    selected = layers[:limit] if limit else layers
+    return [item for item in (_compact_layer_for_client(layer) for layer in selected) if item is not None]
+
+
+def _compact_report_for_client(report_json: dict[str, Any] | None) -> dict[str, Any]:
+    report = report_json or {}
+    agents = report.get("agents") if isinstance(report.get("agents"), dict) else {}
+    data_agent = agents.get("DataRequestAgent") if isinstance(agents.get("DataRequestAgent"), dict) else {}
+    data_request = data_agent.get("data") if isinstance(data_agent.get("data"), dict) else {}
+    spatial = data_request.get("spatial_layers") if isinstance(data_request.get("spatial_layers"), dict) else {}
+
+    land_parts = spatial.get("land_parts")
+    land_parts_count = len(land_parts) if isinstance(land_parts, list) else 0
+    land_parts_limit = 80
+
+    compact: dict[str, Any] = {
+        key: report.get(key)
+        for key in (
+            "check_id",
+            "plot",
+            "nspd",
+            "data_quality",
+            "area_summary",
+            "map_summary",
+            "soil_summary",
+            "infrastructure_summary",
+            "market_summary",
+            "chief_decision",
+            "critical_risk",
+            "report",
+            "client_explanation",
+            "next_steps",
+        )
+        if key in report
+    }
+    compact["spatial_layers"] = {
+        "cadastral_number": spatial.get("cadastral_number") or report.get("plot", {}).get("cadastral_number"),
+        "parcel_geometry_geojson": spatial.get("parcel_geometry_geojson") or "{}",
+        "restriction_layers": _compact_layers_for_client(spatial.get("restriction_layers")),
+        "land_use_layers": _compact_layers_for_client(spatial.get("land_use_layers")),
+        "real_estate_objects": _compact_layers_for_client(spatial.get("real_estate_objects")),
+        "child_real_estate_objects": _compact_layers_for_client(spatial.get("child_real_estate_objects")),
+        "land_parts": _compact_layers_for_client(land_parts, limit=land_parts_limit),
+        "land_parts_total": land_parts_count,
+        "land_parts_returned": min(land_parts_count, land_parts_limit),
+        "land_composition": spatial.get("land_composition") if isinstance(spatial.get("land_composition"), list) else [],
+        "warnings": spatial.get("warnings") if isinstance(spatial.get("warnings"), list) else [],
+    }
+    return compact
+
+
 def _check_response(check: LandCheck) -> check_pb2.CheckResponse:
     return check_pb2.CheckResponse(
         check_id=str(check.id),
@@ -275,7 +353,7 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
                 next_steps=[],
             )
 
-        merged = {**geo_meta, **(result.report_json or {})}
+        merged = {**geo_meta, **_compact_report_for_client(result.report_json)}
         try:
             report_str = json.dumps(merged, ensure_ascii=False)
         except (TypeError, ValueError):

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -413,6 +415,10 @@ class NspdChildObjectClient:
     ) -> None:
         self.base_url = (base_url or settings.rosreestr_api_url).rstrip("/")
         self.timeout = timeout or settings.nspd_map_layers_timeout
+        self.child_lookup_concurrency = max(1, int(settings.nspd_child_lookup_concurrency))
+        self.child_lookup_limit = max(1, int(settings.nspd_child_lookup_limit))
+        self.child_lookup_timeout = max(1.0, float(settings.nspd_child_lookup_timeout))
+        self.child_lookup_total_timeout = max(self.child_lookup_timeout, float(settings.nspd_child_lookup_total_timeout))
         self.verify_ssl = settings.rosreestr_verify_ssl if verify_ssl is None else verify_ssl
         if settings.nspd_insecure_tls:
             self.verify_ssl = False
@@ -468,6 +474,62 @@ class NspdChildObjectClient:
         features = _extract_features(payload)
         return features[0] if features and isinstance(features[0], dict) else None
 
+    async def _lookup_features_for_numbers(
+        self,
+        client: httpx.AsyncClient,
+        numbers: list[str],
+        *,
+        warning_prefix: str,
+    ) -> tuple[dict[str, dict[str, Any] | None], list[str]]:
+        warnings: list[str] = []
+        limited_numbers = numbers[: self.child_lookup_limit]
+        if len(numbers) > len(limited_numbers):
+            warnings.append(f"{warning_prefix}_truncated:{len(numbers)}>{len(limited_numbers)}")
+
+        semaphore = asyncio.Semaphore(self.child_lookup_concurrency)
+
+        async def lookup(number: str) -> tuple[str, dict[str, Any] | None, str | None]:
+            async with semaphore:
+                try:
+                    feature = await asyncio.wait_for(
+                        self._lookup_feature(client, number),
+                        timeout=self.child_lookup_timeout,
+                    )
+                    return number, feature, None
+                except Exception as exc:
+                    return number, None, str(exc)
+
+        result: dict[str, dict[str, Any] | None] = {}
+        failed = 0
+        tasks = [asyncio.create_task(lookup(number)) for number in limited_numbers]
+        deadline = time.monotonic() + self.child_lookup_total_timeout
+
+        for task in asyncio.as_completed(tasks, timeout=self.child_lookup_total_timeout):
+            try:
+                number, feature, error = await task
+            except asyncio.TimeoutError:
+                break
+            except Exception:
+                failed += 1
+                continue
+            result[number] = feature
+            if error:
+                failed += 1
+            if time.monotonic() >= deadline:
+                break
+
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+        pending_count = len([task for task in tasks if not task.done()])
+        if pending_count:
+            warnings.append(f"{warning_prefix}_timeout_pending:{pending_count}")
+        if failed:
+            warnings.append(f"{warning_prefix}_lookup_failed:{failed}")
+
+        return result, warnings
+
     async def collect_for_plot(
         self,
         *,
@@ -492,74 +554,105 @@ class NspdChildObjectClient:
             return child_objects, land_parts, land_composition, warnings
 
         async with await self._client() as client:
-            try:
-                objects_payload = await self._get_first_successful_json(
-                    client,
-                    (
-                        f"/geoportal/v1/tab-group-data?tabClass=objectsList&categoryId={category_id}&geomId={geom_id}",
-                        f"/geoportal/v1/tab-group-data?tabClass=objectsList&geomId={geom_id}&categoryId={category_id}",
-                    ),
-                )
-                object_numbers: set[str] = set()
-                _collect_cadastral_numbers(objects_payload, object_numbers)
-                object_numbers.discard(cadastral_number)
-                for number in sorted(object_numbers):
-                    child_feature = await self._lookup_feature(client, number)
-                    child_objects.append(
-                        _child_layer(
-                            cadastral_number=number,
-                            layer_type="child_real_estate_object",
-                            label="Объект недвижимости",
-                            geometry=_geometry_from_feature(child_feature),
-                            source="nspd_tab_objects",
-                            properties=_attrs_from_feature(child_feature),
+            async def collect_objects() -> tuple[list[CollectedSpatialLayer], list[str]]:
+                local_warnings: list[str] = []
+                local_layers: list[CollectedSpatialLayer] = []
+                try:
+                    objects_payload = await self._get_first_successful_json(
+                        client,
+                        (
+                            f"/geoportal/v1/tab-group-data?tabClass=objectsList&categoryId={category_id}&geomId={geom_id}",
+                            f"/geoportal/v1/tab-group-data?tabClass=objectsList&geomId={geom_id}&categoryId={category_id}",
+                        ),
+                    )
+                    object_numbers: set[str] = set()
+                    _collect_cadastral_numbers(objects_payload, object_numbers)
+                    object_numbers.discard(cadastral_number)
+                    child_features, lookup_warnings = await self._lookup_features_for_numbers(
+                        client,
+                        sorted(object_numbers),
+                        warning_prefix="nspd_child_objects",
+                    )
+                    local_warnings.extend(lookup_warnings)
+                    for number, child_feature in child_features.items():
+                        local_layers.append(
+                            _child_layer(
+                                cadastral_number=number,
+                                layer_type="child_real_estate_object",
+                                label="Объект недвижимости",
+                                geometry=_geometry_from_feature(child_feature),
+                                source="nspd_tab_objects",
+                                properties=_attrs_from_feature(child_feature),
+                            )
                         )
-                    )
-            except Exception as exc:
-                warnings.append(f"nspd_child_objects_failed:{exc}")
+                except Exception as exc:
+                    local_warnings.append(f"nspd_child_objects_failed:{exc}")
+                return local_layers, local_warnings
 
-            try:
-                parts_payload = await self._get_first_successful_json(
-                    client,
-                    (
-                        f"/geoportal/v1/tab-values-data?tabClass=landParts&categoryId={category_id}&geomId={geom_id}",
-                        f"/geoportal/v1/tab-values-data?tabClass=landParts&geomId={geom_id}&categoryId={category_id}",
-                    ),
-                )
-                part_numbers: set[str] = set()
-                _collect_cadastral_numbers(parts_payload, part_numbers)
-                part_numbers.discard(cadastral_number)
-                for number in sorted(part_numbers):
-                    part_feature = await self._lookup_feature(client, number)
-                    land_parts.append(
-                        _child_layer(
-                            cadastral_number=number,
-                            layer_type="land_part",
-                            label="Часть земельного участка",
-                            geometry=_geometry_from_feature(part_feature),
-                            source="nspd_tab_land_parts",
-                            properties=_attrs_from_feature(part_feature),
+            async def collect_parts() -> tuple[list[CollectedSpatialLayer], list[str]]:
+                local_warnings: list[str] = []
+                local_layers: list[CollectedSpatialLayer] = []
+                try:
+                    parts_payload = await self._get_first_successful_json(
+                        client,
+                        (
+                            f"/geoportal/v1/tab-values-data?tabClass=landParts&categoryId={category_id}&geomId={geom_id}",
+                            f"/geoportal/v1/tab-values-data?tabClass=landParts&geomId={geom_id}&categoryId={category_id}",
+                        ),
+                    )
+                    part_numbers: set[str] = set()
+                    _collect_cadastral_numbers(parts_payload, part_numbers)
+                    part_numbers.discard(cadastral_number)
+                    part_features, lookup_warnings = await self._lookup_features_for_numbers(
+                        client,
+                        sorted(part_numbers),
+                        warning_prefix="nspd_land_parts",
+                    )
+                    local_warnings.extend(lookup_warnings)
+                    for number, part_feature in part_features.items():
+                        local_layers.append(
+                            _child_layer(
+                                cadastral_number=number,
+                                layer_type="land_part",
+                                label="Часть земельного участка",
+                                geometry=_geometry_from_feature(part_feature),
+                                source="nspd_tab_land_parts",
+                                properties=_attrs_from_feature(part_feature),
+                            )
                         )
-                    )
-            except Exception as exc:
-                warnings.append(f"nspd_land_parts_failed:{exc}")
+                except Exception as exc:
+                    local_warnings.append(f"nspd_land_parts_failed:{exc}")
+                return local_layers, local_warnings
 
-            try:
-                composition_paths = [
-                    f"/geoportal/v1/tab-values-data?tabClass=compositionLand&categoryId={category_id}&geomId={geom_id}",
-                    f"/geoportal/v1/tab-values-data?tabClass=compositionLand&geomId={geom_id}&categoryId={category_id}",
-                ]
-                if registers_id:
-                    composition_paths.append(
-                        f"/geoportal/v1/tab-values-data?tabClass=compositionLand&objdocId={geom_id}&registersId={registers_id}"
-                    )
-                composition_payload = await self._get_first_successful_json(client, tuple(composition_paths))
-                if isinstance(composition_payload, list):
-                    land_composition = [item for item in composition_payload if isinstance(item, dict)]
-                elif isinstance(composition_payload, dict):
-                    land_composition = [composition_payload]
-            except Exception as exc:
-                warnings.append(f"nspd_land_composition_failed:{exc}")
+            async def collect_composition() -> tuple[list[dict[str, Any]], list[str]]:
+                local_warnings: list[str] = []
+                try:
+                    composition_paths = [
+                        f"/geoportal/v1/tab-values-data?tabClass=compositionLand&categoryId={category_id}&geomId={geom_id}",
+                        f"/geoportal/v1/tab-values-data?tabClass=compositionLand&geomId={geom_id}&categoryId={category_id}",
+                    ]
+                    if registers_id:
+                        composition_paths.append(
+                            f"/geoportal/v1/tab-values-data?tabClass=compositionLand&objdocId={geom_id}&registersId={registers_id}"
+                        )
+                    composition_payload = await self._get_first_successful_json(client, tuple(composition_paths))
+                    if isinstance(composition_payload, list):
+                        return [item for item in composition_payload if isinstance(item, dict)], local_warnings
+                    if isinstance(composition_payload, dict):
+                        return [composition_payload], local_warnings
+                except Exception as exc:
+                    local_warnings.append(f"nspd_land_composition_failed:{exc}")
+                return [], local_warnings
+
+            objects_result, parts_result, composition_result = await asyncio.gather(
+                collect_objects(),
+                collect_parts(),
+                collect_composition(),
+            )
+            child_objects, object_warnings = objects_result
+            land_parts, part_warnings = parts_result
+            land_composition, composition_warnings = composition_result
+            warnings.extend([*object_warnings, *part_warnings, *composition_warnings])
 
         return child_objects, land_parts, land_composition, warnings
 

@@ -24,6 +24,12 @@ import search_pb2  # noqa: E402
 import search_pb2_grpc  # noqa: E402
 
 
+GRPC_MESSAGE_OPTIONS = [
+    ("grpc.max_send_message_length", 128 * 1024 * 1024),
+    ("grpc.max_receive_message_length", 128 * 1024 * 1024),
+]
+
+
 def _run_async(coro):
     return asyncio.run(coro)
 
@@ -98,13 +104,13 @@ def _as_list(value: Any) -> list[str]:
 
 
 async def _check_stub_call(method: str, request) -> None:
-    async with grpc.aio.insecure_channel(settings.check_grpc) as channel:
+    async with grpc.aio.insecure_channel(settings.check_grpc, options=GRPC_MESSAGE_OPTIONS) as channel:
         stub = check_pb2_grpc.CheckServiceStub(channel)
         await getattr(stub, method)(request)
 
 
 async def _search_stub_call(method: str, request) -> None:
-    async with grpc.aio.insecure_channel(settings.search_grpc) as channel:
+    async with grpc.aio.insecure_channel(settings.search_grpc, options=GRPC_MESSAGE_OPTIONS) as channel:
         stub = search_pb2_grpc.SearchServiceStub(channel)
         await getattr(stub, method)(request)
 

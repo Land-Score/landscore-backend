@@ -22,6 +22,10 @@ if BaseSettings is not None:
         market_search_enabled: bool = False
         nspd_map_layers_enabled: bool = True
         nspd_map_layers_timeout: float = 30.0
+        nspd_child_lookup_concurrency: int = 64
+        nspd_child_lookup_limit: int = 160
+        nspd_child_lookup_timeout: float = 100.0
+        nspd_child_lookup_total_timeout: float = 100.0
 
         model_config = {"env_file": ".env", "extra": "ignore"}
 else:
@@ -41,6 +45,10 @@ else:
         market_search_enabled: bool = os.getenv("MARKET_SEARCH_ENABLED", "false").lower() in {"1", "true", "yes"}
         nspd_map_layers_enabled: bool = os.getenv("NSPD_MAP_LAYERS_ENABLED", "true").lower() in {"1", "true", "yes"}
         nspd_map_layers_timeout: float = float(os.getenv("NSPD_MAP_LAYERS_TIMEOUT", "30"))
+        nspd_child_lookup_concurrency: int = int(os.getenv("NSPD_CHILD_LOOKUP_CONCURRENCY", "64"))
+        nspd_child_lookup_limit: int = int(os.getenv("NSPD_CHILD_LOOKUP_LIMIT", "160"))
+        nspd_child_lookup_timeout: float = float(os.getenv("NSPD_CHILD_LOOKUP_TIMEOUT", "100"))
+        nspd_child_lookup_total_timeout: float = float(os.getenv("NSPD_CHILD_LOOKUP_TOTAL_TIMEOUT", "100"))
 
 
 settings = Settings()

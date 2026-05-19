@@ -68,9 +68,12 @@ def _to_geo_real_estate_object(layer: dict) -> dict:
         area_sqm = float(area or 0)
     except (TypeError, ValueError):
         area_sqm = 0.0
+    object_type = props.get("objectType") or layer.get("normalized_type") or "unknown"
+    if object_type == "child_real_estate_object":
+        object_type = "unknown"
     return {
         "cadastral_number": str(props.get("cadastralNumber") or ""),
-        "object_type": props.get("objectType") or layer.get("normalized_type") or "unknown",
+        "object_type": object_type,
         "name": layer.get("label") or layer.get("source_layer_name", ""),
         "area_sqm": area_sqm,
         "geometry_geojson": layer.get("geometry_geojson", "{}") if _valid_geometry_json(layer.get("geometry_geojson", "{}")) else "",

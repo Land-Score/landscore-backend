@@ -47,6 +47,43 @@ def _set_unimplemented(context: Any, message: str = "Not implemented yet") -> No
     context.set_details(message)
 
 
+def _polygon_coordinates_from_geometry(geometry: dict[str, Any] | None) -> list[Any]:
+    if not isinstance(geometry, dict):
+        return []
+    geometry_type = geometry.get("type")
+    if geometry_type == "Feature":
+        return _polygon_coordinates_from_geometry(geometry.get("geometry"))
+    if geometry_type == "Polygon" and isinstance(geometry.get("coordinates"), list):
+        return [geometry["coordinates"]]
+    if geometry_type == "MultiPolygon" and isinstance(geometry.get("coordinates"), list):
+        return list(geometry["coordinates"])
+    if geometry_type == "GeometryCollection" and isinstance(geometry.get("geometries"), list):
+        polygons: list[Any] = []
+        for item in geometry["geometries"]:
+            polygons.extend(_polygon_coordinates_from_geometry(item))
+        return polygons
+    return []
+
+
+def _parcel_geometry_from_land_parts(land_parts: list[Any]) -> dict[str, Any] | None:
+    polygons: list[Any] = []
+    for layer in land_parts:
+        polygons.extend(_polygon_coordinates_from_geometry(getattr(layer, "geometry", None)))
+    if not polygons:
+        return None
+    return {"type": "MultiPolygon", "coordinates": polygons}
+
+
+def _merge_spatial_data(target: Any, source: Any) -> None:
+    target.restriction_layers.extend(source.restriction_layers)
+    target.land_use_layers.extend(source.land_use_layers)
+    target.real_estate_objects.extend(source.real_estate_objects)
+    target.valuation_layers.extend(source.valuation_layers)
+    target.informational_layers.extend(source.informational_layers)
+    target.raw_layers.extend(source.raw_layers)
+    target.warnings.extend(source.warnings)
+
+
 def _normalize_raw_features_by_layer(raw: Any) -> dict[str, list[dict[str, Any]]]:
     if not isinstance(raw, dict):
         raise ValueError("raw_features_by_layer_json must be a JSON object")
@@ -158,7 +195,7 @@ class DataCollectorServicer:
             source=raw_source,
         )
 
-        if settings.rosreestr_mode.lower() == "real" and getattr(request, "include_real_estate_objects", False):
+        if settings.rosreestr_mode.lower() == "real":
             try:
                 if plot is None:
                     plot = await get_client().get_plot(request.cadastral_number)
@@ -170,8 +207,40 @@ class DataCollectorServicer:
                 data.land_parts.extend(land_parts)
                 data.land_composition.extend(land_composition)
                 warnings.extend(child_warnings)
+                if data.parcel_geometry is None:
+                    parts_geometry = _parcel_geometry_from_land_parts(data.land_parts)
+                    if parts_geometry is not None:
+                        data.parcel_geometry = parts_geometry
+                        parcel_geometry = parts_geometry
+                        warnings.append("parcel_geometry_built_from_land_parts")
             except Exception as exc:
                 warnings.append(f"nspd_child_tabs_failed:{exc}")
+
+        if (
+            not raw_features_by_layer
+            and raw_source != "nspd_map"
+            and data.parcel_geometry is not None
+            and settings.nspd_map_layers_enabled
+            and settings.rosreestr_mode.lower() == "real"
+        ):
+            try:
+                flags = _spatial_include_flags(request)
+                source_layer_keys = list(getattr(request, "source_layer_keys", []))
+                raw_features_by_layer, layer_warnings = await NspdMapLayerClient().collect_raw_layers(
+                    parcel_geometry=data.parcel_geometry,
+                    source_layer_keys=source_layer_keys,
+                    **flags,
+                )
+                extra_data = self.spatial_collector.collect_from_features(
+                    cadastral_number=request.cadastral_number,
+                    raw_features_by_layer=raw_features_by_layer,
+                    parcel_geometry=data.parcel_geometry,
+                    source="nspd_map",
+                )
+                _merge_spatial_data(data, extra_data)
+                warnings.extend(layer_warnings)
+            except Exception as exc:
+                warnings.append(f"nspd_map_layers_from_land_parts_failed:{exc}")
 
         data.warnings.extend(warnings)
         return _message_or_dict("SpatialLayersResponse", collected_spatial_data_to_dict(data))

@@ -445,7 +445,7 @@ def _extend_map_payload_with_spatial_children(
             layer,
             layer_type="land_part",
             label="Часть земельного участка",
-            color="#f97316",
+            color="#a21caf",
             include_raw=include_raw,
         )
         if feature:

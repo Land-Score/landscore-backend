@@ -15,8 +15,17 @@ except ImportError:
 from app.servicer import DataCollectorServicer
 
 
+GRPC_MESSAGE_OPTIONS = [
+    ("grpc.max_send_message_length", 128 * 1024 * 1024),
+    ("grpc.max_receive_message_length", 128 * 1024 * 1024),
+]
+
+
 async def serve() -> None:
-    server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = grpc.aio.server(
+        futures.ThreadPoolExecutor(max_workers=10),
+        options=GRPC_MESSAGE_OPTIONS,
+    )
     if data_collector_pb2_grpc is not None:
         data_collector_pb2_grpc.add_DataCollectorServiceServicer_to_server(DataCollectorServicer(), server)
     else:

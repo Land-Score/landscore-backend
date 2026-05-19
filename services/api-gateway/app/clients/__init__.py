@@ -25,6 +25,12 @@ from app.config import settings  # noqa: E402
 log = structlog.get_logger()
 
 
+GRPC_MESSAGE_OPTIONS = [
+    ("grpc.max_send_message_length", 128 * 1024 * 1024),
+    ("grpc.max_receive_message_length", 128 * 1024 * 1024),
+]
+
+
 async def setup_clients(app: FastAPI) -> None:
     """Open gRPC channels and attach stubs to app.state at startup."""
     # Import stubs after sys.path is set
@@ -35,22 +41,22 @@ async def setup_clients(app: FastAPI) -> None:
     import data_collector_pb2_grpc
     import geo_pb2_grpc
 
-    app.state.auth_channel = grpc.aio.insecure_channel(settings.auth_grpc)
+    app.state.auth_channel = grpc.aio.insecure_channel(settings.auth_grpc, options=GRPC_MESSAGE_OPTIONS)
     app.state.auth_stub = auth_pb2_grpc.AuthServiceStub(app.state.auth_channel)
 
-    app.state.check_channel = grpc.aio.insecure_channel(settings.check_grpc)
+    app.state.check_channel = grpc.aio.insecure_channel(settings.check_grpc, options=GRPC_MESSAGE_OPTIONS)
     app.state.check_stub = check_pb2_grpc.CheckServiceStub(app.state.check_channel)
 
-    app.state.search_channel = grpc.aio.insecure_channel(settings.search_grpc)
+    app.state.search_channel = grpc.aio.insecure_channel(settings.search_grpc, options=GRPC_MESSAGE_OPTIONS)
     app.state.search_stub = search_pb2_grpc.SearchServiceStub(app.state.search_channel)
 
-    app.state.document_channel = grpc.aio.insecure_channel(settings.document_grpc)
+    app.state.document_channel = grpc.aio.insecure_channel(settings.document_grpc, options=GRPC_MESSAGE_OPTIONS)
     app.state.document_stub = document_pb2_grpc.DocumentServiceStub(app.state.document_channel)
 
-    app.state.data_collector_channel = grpc.aio.insecure_channel(settings.data_collector_grpc)
+    app.state.data_collector_channel = grpc.aio.insecure_channel(settings.data_collector_grpc, options=GRPC_MESSAGE_OPTIONS)
     app.state.data_collector_stub = data_collector_pb2_grpc.DataCollectorServiceStub(app.state.data_collector_channel)
 
-    app.state.geo_channel = grpc.aio.insecure_channel(settings.geo_grpc)
+    app.state.geo_channel = grpc.aio.insecure_channel(settings.geo_grpc, options=GRPC_MESSAGE_OPTIONS)
     app.state.geo_stub = geo_pb2_grpc.GeoServiceStub(app.state.geo_channel)
 
     # Celery producer — used only for send_task() to ai-orchestrator worker.

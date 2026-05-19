@@ -19,6 +19,10 @@ except ImportError:
 class DataCollectorClient:
     def __init__(self, target: str | None = None) -> None:
         self.target = target or settings.data_collector_grpc
+        self.channel_options = [
+            ("grpc.max_send_message_length", 128 * 1024 * 1024),
+            ("grpc.max_receive_message_length", 128 * 1024 * 1024),
+        ]
 
     async def collect_spatial_layers(
         self,
@@ -48,7 +52,7 @@ class DataCollectorClient:
         )
         if source_layer_keys:
             request.source_layer_keys.extend(source_layer_keys)
-        async with grpc.aio.insecure_channel(self.target) as channel:
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
             stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
             response = await stub.CollectPlotSpatialLayers(request)
         return MessageToDict(response, preserving_proto_field_name=True)
@@ -58,7 +62,7 @@ class DataCollectorClient:
             raise RuntimeError("Generated data_collector proto stubs are missing. Run `make proto` first.")
 
         request = data_collector_pb2.CadastralRequest(cadastral_number=cadastral_number)
-        async with grpc.aio.insecure_channel(self.target) as channel:
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
             stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
             response = await stub.CollectPlotDataset(request)
         return MessageToDict(response, preserving_proto_field_name=True)

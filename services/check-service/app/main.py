@@ -20,6 +20,12 @@ from app.servicer import CheckServicer  # noqa: E402
 log = structlog.get_logger()
 
 
+GRPC_MESSAGE_OPTIONS = [
+    ("grpc.max_send_message_length", 128 * 1024 * 1024),
+    ("grpc.max_receive_message_length", 128 * 1024 * 1024),
+]
+
+
 async def init_db() -> None:
     """Create tables if they don't exist (idempotent fallback after alembic)."""
     async with engine.begin() as conn:
@@ -29,7 +35,10 @@ async def init_db() -> None:
 
 async def serve() -> None:
     await init_db()
-    server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = grpc.aio.server(
+        futures.ThreadPoolExecutor(max_workers=10),
+        options=GRPC_MESSAGE_OPTIONS,
+    )
     check_pb2_grpc.add_CheckServiceServicer_to_server(CheckServicer(), server)
     server.add_insecure_port(f"0.0.0.0:{settings.grpc_port}")
     log.info("check_service_starting", port=settings.grpc_port)

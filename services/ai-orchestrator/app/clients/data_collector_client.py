@@ -66,3 +66,63 @@ class DataCollectorClient:
             stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
             response = await stub.CollectPlotDataset(request)
         return MessageToDict(response, preserving_proto_field_name=True)
+
+    async def get_plot_by_cadastral(self, cadastral_number: str) -> dict:
+        if data_collector_pb2 is None or data_collector_pb2_grpc is None:
+            raise RuntimeError("Generated data_collector proto stubs are missing. Run `make proto` first.")
+
+        request = data_collector_pb2.CadastralRequest(cadastral_number=cadastral_number)
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
+            stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
+            response = await stub.GetPlotByCadastral(request)
+        return MessageToDict(response, preserving_proto_field_name=True)
+
+    async def get_plot_by_address(self, address: str) -> dict:
+        if data_collector_pb2 is None or data_collector_pb2_grpc is None:
+            raise RuntimeError("Generated data_collector proto stubs are missing. Run `make proto` first.")
+
+        request = data_collector_pb2.AddressRequest(address=address)
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
+            stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
+            response = await stub.GetPlotByAddress(request)
+        return MessageToDict(response, preserving_proto_field_name=True)
+
+    async def get_egrn(self, cadastral_number: str, use_cache: bool = True) -> dict:
+        if data_collector_pb2 is None or data_collector_pb2_grpc is None:
+            raise RuntimeError("Generated data_collector proto stubs are missing. Run `make proto` first.")
+
+        request = data_collector_pb2.EGRNRequest(cadastral_number=cadastral_number, use_cache=use_cache)
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
+            stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
+            response = await stub.GetEGRN(request)
+        return MessageToDict(response, preserving_proto_field_name=True)
+
+    async def search_plots(
+        self,
+        *,
+        region: str = "",
+        category: str = "",
+        allowed_use: str = "",
+        area_min: float = 0.0,
+        area_max: float = 0.0,
+        price_min: float = 0.0,
+        price_max: float = 0.0,
+        limit: int = 20,
+    ) -> dict:
+        if data_collector_pb2 is None or data_collector_pb2_grpc is None:
+            raise RuntimeError("Generated data_collector proto stubs are missing. Run `make proto` first.")
+
+        request = data_collector_pb2.SearchPlotsRequest(
+            region=region,
+            category=category,
+            allowed_use=allowed_use,
+            area_min=area_min,
+            area_max=area_max,
+            price_min=price_min,
+            price_max=price_max,
+            limit=limit,
+        )
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
+            stub = data_collector_pb2_grpc.DataCollectorServiceStub(channel)
+            response = await stub.SearchPlots(request)
+        return MessageToDict(response, preserving_proto_field_name=True)

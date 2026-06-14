@@ -41,5 +41,7 @@ class CriticalRiskAgent(BaseLLMAgent):
             "legal": ctx.get("LegalAgent"),
             "land_use": ctx.get("LandUseAgent"),
             "restrictions": ctx.get("RestrictionsAgent"),
-            "geo": ctx.get("GeoAgent"),
+            # Compact spatial summary (areas, loss %, top restriction labels) — NOT the raw
+            # GeoAgent output, which embeds full-polygon GeoJSON and overflows the LLM input limit.
+            "geo": ctx.get("map_summary"),
         }, ensure_ascii=False, default=str)

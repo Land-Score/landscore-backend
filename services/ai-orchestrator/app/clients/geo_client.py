@@ -53,3 +53,71 @@ class GeoClient:
             stub = geo_pb2_grpc.GeoServiceStub(channel)
             response = await stub.AnalyzeLandUseRestrictions(request)
         return MessageToDict(response, preserving_proto_field_name=True)
+
+    async def analyze_plot_location(
+        self,
+        *,
+        lat: float,
+        lng: float,
+        cadastral_number: str = "",
+    ) -> dict:
+        if geo_pb2 is None or geo_pb2_grpc is None:
+            raise RuntimeError("Generated geo proto stubs are missing. Run `make proto` first.")
+
+        request = geo_pb2.LocationRequest(lat=lat, lng=lng, cadastral_number=cadastral_number)
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
+            stub = geo_pb2_grpc.GeoServiceStub(channel)
+            response = await stub.AnalyzePlotLocation(request)
+        return MessageToDict(response, preserving_proto_field_name=True)
+
+    async def get_distances(
+        self,
+        *,
+        from_lat: float,
+        from_lng: float,
+        to_poi_types: list[str] | None = None,
+    ) -> dict:
+        if geo_pb2 is None or geo_pb2_grpc is None:
+            raise RuntimeError("Generated geo proto stubs are missing. Run `make proto` first.")
+
+        request = geo_pb2.DistanceRequest(from_lat=from_lat, from_lng=from_lng)
+        if to_poi_types:
+            request.to_poi_types.extend(to_poi_types)
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
+            stub = geo_pb2_grpc.GeoServiceStub(channel)
+            response = await stub.GetDistances(request)
+        return MessageToDict(response, preserving_proto_field_name=True)
+
+    async def check_protected_zones(self, *, lat: float, lng: float) -> dict:
+        if geo_pb2 is None or geo_pb2_grpc is None:
+            raise RuntimeError("Generated geo proto stubs are missing. Run `make proto` first.")
+
+        request = geo_pb2.ZoneRequest(lat=lat, lng=lng)
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
+            stub = geo_pb2_grpc.GeoServiceStub(channel)
+            response = await stub.CheckProtectedZones(request)
+        return MessageToDict(response, preserving_proto_field_name=True)
+
+    async def search_plots_by_area(
+        self,
+        *,
+        center_lat: float,
+        center_lng: float,
+        radius_km: float,
+        region: str = "",
+        limit: int = 20,
+    ) -> dict:
+        if geo_pb2 is None or geo_pb2_grpc is None:
+            raise RuntimeError("Generated geo proto stubs are missing. Run `make proto` first.")
+
+        request = geo_pb2.AreaSearchRequest(
+            center_lat=center_lat,
+            center_lng=center_lng,
+            radius_km=radius_km,
+            region=region,
+            limit=limit,
+        )
+        async with grpc.aio.insecure_channel(self.target, options=self.channel_options) as channel:
+            stub = geo_pb2_grpc.GeoServiceStub(channel)
+            response = await stub.SearchPlotsByArea(request)
+        return MessageToDict(response, preserving_proto_field_name=True)

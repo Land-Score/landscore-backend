@@ -10,7 +10,14 @@ import httpx
 
 from app.config import settings
 from app.dataset_pipeline import DataCollectionPipeline, dataset_response_dict
-from app.rosreestr_client import egrn_to_dict, get_client, plot_to_dict
+from app.mock_data import (
+    build_child_objects_and_composition as mock_build_children,
+    build_raw_features_by_layer as mock_build_layers,
+)
+from app.mock_data import build_plot_payload as mock_build_plot_payload
+from app.mock_data import stable_hash as mock_stable_hash
+from app.rosreestr_client import PlotData, egrn_to_dict, get_client, plot_to_dict
+from app.layers.normalizer import normalize_feature
 from app.sources.nspd_map_layers import NspdChildObjectClient, NspdMapLayerClient, parcel_geometry_from_plot_raw
 from app.spatial_collector import SpatialLayerCollector, collected_spatial_data_to_dict
 
@@ -84,6 +91,29 @@ def _merge_spatial_data(target: Any, source: Any) -> None:
     target.warnings.extend(source.warnings)
 
 
+def _attach_mock_children(data: Any, cadastral_number: str, source: str = "mock") -> None:
+    """Populate child_real_estate_objects / land_parts / land_composition (mock mode).
+
+    Mirrors what the real NspdChildObjectClient adds on the live path, so the
+    SpatialLayersResponse shape is identical between mock and real.
+    """
+
+    child_features, land_part_features, land_composition = mock_build_children(cadastral_number)
+    for feature in child_features:
+        layer = normalize_feature(feature, "buildings", source=source)
+        if layer is not None:
+            data.child_real_estate_objects.append(layer)
+    for feature in land_part_features:
+        # Land parts carry parcel geometry; normalize as a land-use "unknown" so
+        # the layer keeps geometry + properties for downstream area logic.
+        layer = normalize_feature(feature, "land_use_unknown", source=source)
+        if layer is not None:
+            layer.label = str((feature.get("properties") or {}).get("name") or "Часть земельного участка")
+            data.land_parts.append(layer)
+    if land_composition:
+        data.land_composition.extend(land_composition)
+
+
 def _normalize_raw_features_by_layer(raw: Any) -> dict[str, list[dict[str, Any]]]:
     if not isinstance(raw, dict):
         raise ValueError("raw_features_by_layer_json must be a JSON object")
@@ -115,6 +145,123 @@ def _spatial_include_flags(request: Any) -> dict[str, bool]:
     return flags
 
 
+# Region name -> cadastral region block, for deterministic mock search/lookup.
+_REGION_NAME_TO_BLOCK = {
+    "московск": "50",
+    "москва": "77",
+    "ставропол": "26",
+    "краснодар": "23",
+    "ростов": "61",
+    "ленинградск": "47",
+}
+
+
+def _region_block_from_text(text: str) -> str:
+    lowered = (text or "").lower()
+    for needle, block in _REGION_NAME_TO_BLOCK.items():
+        if needle in lowered:
+            return block
+    return "50"
+
+
+def _plot_from_cadastral(cadastral_number: str) -> PlotData:
+    payload = mock_build_plot_payload(cadastral_number)
+    return PlotData(
+        cadastral_number=payload["cadastral_number"],
+        address=payload["address"],
+        area=payload["area"],
+        category=payload["category"],
+        allowed_use=payload["allowed_use"],
+        owner_type=payload["owner_type"],
+        lat=payload["lat"],
+        lng=payload["lng"],
+        price=payload["price"],
+        status=payload["status"],
+        raw_json=payload["raw_json"],
+    )
+
+
+def _synthesize_cadastral(block: str, seed: int) -> str:
+    district = 1 + (seed // 17 % 60)
+    quarter = 1000001 + (seed % 9_000_000)
+    parcel = 1 + (seed % 900)
+    return f"{block}:{district:02d}:{quarter:07d}:{parcel}"
+
+
+def _mock_plot_for_address(address: str) -> PlotData:
+    """Deterministically synthesize a plot from a free-text address."""
+
+    block = _region_block_from_text(address)
+    seed = mock_stable_hash("addr:" + (address or "").strip())
+    cadastral_number = _synthesize_cadastral(block, seed)
+    plot = _plot_from_cadastral(cadastral_number)
+    # Keep the user-supplied address visible while retaining synthetic geo.
+    if address and address.strip():
+        plot.address = address.strip()
+        plot.raw_json = {**plot.raw_json, "query_address": address.strip(), "source": "mock"}
+    return plot
+
+
+def _mock_search_plots(request: Any) -> list[dict[str, Any]]:
+    """Generate a deterministic list of candidate plots matching the filters."""
+
+    limit = int(getattr(request, "limit", 0) or 0)
+    if limit <= 0:
+        limit = 8
+    limit = min(limit, 50)
+
+    region = str(getattr(request, "region", "") or "")
+    category = str(getattr(request, "category", "") or "")
+    allowed_use = str(getattr(request, "allowed_use", "") or "")
+    area_min = float(getattr(request, "area_min", 0) or 0)
+    area_max = float(getattr(request, "area_max", 0) or 0)
+    price_min = float(getattr(request, "price_min", 0) or 0)
+    price_max = float(getattr(request, "price_max", 0) or 0)
+
+    block = _region_block_from_text(region)
+    filter_seed = mock_stable_hash(
+        f"search:{region}|{category}|{allowed_use}|{area_min}|{area_max}|{price_min}|{price_max}"
+    )
+
+    plots: list[dict[str, Any]] = []
+    attempts = 0
+    index = 0
+    # Walk a deterministic sequence of candidate cadastral numbers and keep the
+    # ones matching the filters, biasing risk profiles to be varied via index.
+    while len(plots) < limit and attempts < limit * 40:
+        attempts += 1
+        candidate_seed = mock_stable_hash(f"{filter_seed}:{index}")
+        index += 1
+        cadastral_number = _synthesize_cadastral(block, candidate_seed)
+        plot = _plot_from_cadastral(cadastral_number)
+
+        if category and category.strip() and category.strip().lower() not in plot.category.lower():
+            continue
+        if allowed_use and allowed_use.strip() and allowed_use.strip().lower() not in plot.allowed_use.lower():
+            continue
+        area_ha = plot.area / 10_000.0
+        if area_min and area_ha < area_min:
+            continue
+        if area_max and area_ha > area_max:
+            continue
+        if price_min and plot.price < price_min:
+            continue
+        if price_max and plot.price > price_max:
+            continue
+
+        plots.append(_plot_response_dict(plot))
+
+    # Guarantee a non-empty, useful shortlist even when filters are very tight:
+    # fall back to filter-relaxed candidates so the pipeline always has inputs.
+    if not plots:
+        for fallback_index in range(limit):
+            candidate_seed = mock_stable_hash(f"{filter_seed}:fallback:{fallback_index}")
+            cadastral_number = _synthesize_cadastral(block, candidate_seed)
+            plots.append(_plot_response_dict(_plot_from_cadastral(cadastral_number)))
+
+    return plots
+
+
 class DataCollectorServicer:
     """Implements data_collector.proto DataCollectorService business logic."""
 
@@ -127,16 +274,27 @@ class DataCollectorServicer:
         return _message_or_dict("PlotDataResponse", _plot_response_dict(plot))
 
     async def GetPlotByAddress(self, request, context):
-        _set_unimplemented(context, "Address lookup needs geocoder integration")
-        return _message_or_dict("PlotDataResponse", {})
+        if settings.rosreestr_mode.lower() == "real":
+            _set_unimplemented(context, "Address lookup needs geocoder integration")
+            return _message_or_dict("PlotDataResponse", {})
+
+        plot = _mock_plot_for_address(request.address)
+        return _message_or_dict("PlotDataResponse", _plot_response_dict(plot))
 
     async def GetEGRN(self, request, context):
         egrn = await get_client().get_egrn(request.cadastral_number)
         return _message_or_dict("EGRNResponse", _egrn_response_dict(egrn))
 
     async def SearchPlots(self, request, context):
-        _set_unimplemented(context, "Search requires a persisted search index")
-        return _message_or_dict("SearchPlotsResponse", {"plots": [], "total": 0})
+        if settings.rosreestr_mode.lower() == "real":
+            _set_unimplemented(context, "Search requires a persisted search index")
+            return _message_or_dict("SearchPlotsResponse", {"plots": [], "total": 0})
+
+        plots = _mock_search_plots(request)
+        return _message_or_dict(
+            "SearchPlotsResponse",
+            {"plots": plots, "total": len(plots)},
+        )
 
     async def CollectPlotSpatialLayers(self, request, context):
         """Collect and normalize NSPD map layers intersecting a cadastral parcel."""
@@ -162,11 +320,20 @@ class DataCollectorServicer:
                 context.set_details("parcel_geometry_geojson must be valid GeoJSON geometry")
                 return _message_or_dict("SpatialLayersResponse", {})
 
-        if not raw_features_by_layer:
+        mock_mode = settings.rosreestr_mode.lower() != "real"
+
+        if not raw_features_by_layer and mock_mode:
+            # Synthesize a deterministic, realistic set of layers intersecting
+            # the parcel so the AI pipeline has rich spatial inputs offline.
+            raw_features_by_layer = mock_build_layers(request.cadastral_number)
+            raw_source = "mock"
+            if parcel_geometry is None:
+                parcel_geometry = mock_build_plot_payload(request.cadastral_number)["_geometry"]
+            warnings.append("spatial_layers_synthesized_in_mock_mode")
+
+        if not raw_features_by_layer and not mock_mode:
             if not settings.nspd_map_layers_enabled:
                 warnings.append("nspd_map_layers_disabled")
-            elif settings.rosreestr_mode.lower() != "real":
-                warnings.append("nspd_map_layers_live_collection_requires_rosreestr_mode_real")
             else:
                 if parcel_geometry is None:
                     try:
@@ -194,6 +361,11 @@ class DataCollectorServicer:
             parcel_geometry=parcel_geometry,
             source=raw_source,
         )
+
+        if mock_mode:
+            _attach_mock_children(data, request.cadastral_number, source=raw_source)
+            if data.parcel_geometry is None:
+                data.parcel_geometry = mock_build_plot_payload(request.cadastral_number)["_geometry"]
 
         if settings.rosreestr_mode.lower() == "real":
             try:

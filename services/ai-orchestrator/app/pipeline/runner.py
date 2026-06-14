@@ -44,7 +44,10 @@ class PipelineRunner:
                         await self.on_progress(agent.name, pct, result)
             else:
                 start = time.monotonic()
-                result = await step.run({}, ctx)
+                try:
+                    result = await step.run({}, ctx)
+                except Exception as exc:  # noqa: BLE001 - one agent must never abort the pipeline
+                    result = AgentResult(success=False, data={}, error=f"{type(exc).__name__}: {exc}")
                 result.duration_ms = result.duration_ms or int((time.monotonic() - start) * 1000)
 
                 if result.success:

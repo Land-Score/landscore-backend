@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from app.config import settings
+from app.mock_data import mock_dataset
 from app.rosreestr_client import get_client, plot_to_dict
 from app.sources.market_search import MarketSearchClient
 from app.sources.overpass import OverpassInfrastructureClient
@@ -66,16 +67,7 @@ def dataset_response_dict(dataset: dict[str, Any]) -> dict[str, Any]:
 
 
 def _mock_dataset(plot_data: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "success": True,
-        "source": "data_collector_dataset_pipeline_mock",
-        "cadastralNumber": plot_data.get("cadastral_number", ""),
-        "nspd": plot_data,
-        "soil": {"success": True, "source": "mock", "soil": {}, "limitations": ["mock_mode_no_external_soil_request"]},
-        "infrastructure": {"success": True, "source": "mock", "counts": {}, "limitations": ["mock_mode_no_overpass_request"]},
-        "marketLiquidity": _market_disabled(),
-        "warnings": ["ROSREESTR_MODE is not real; external parsers were not called."],
-    }
+    return mock_dataset(plot_data)
 
 
 def _market_disabled() -> dict[str, Any]:

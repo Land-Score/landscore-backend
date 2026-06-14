@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import math
-import random
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -18,6 +17,11 @@ from urllib.parse import quote, urlsplit, urlunsplit
 import httpx
 
 from app.config import settings
+from app.mock_data import (
+    build_egrn_payload as mock_build_egrn_payload,
+    build_plot_payload as mock_build_plot_payload,
+    stable_hash,
+)
 
 LAND_PLOTS_CATEGORY_ID = 36368
 CADASTRAL_NUMBER_RE = re.compile(r"\b\d{1,2}:\d{1,2}:\d{1,10}:\d{1,10}(?:/\d+)?\b")
@@ -278,47 +282,55 @@ def _plot_from_feature(
 
 
 class MockRosreestrClient:
-    """Returns realistic fake data for demo/local development."""
+    """Returns deterministic, realistic fake data for demo/local development.
+
+    All values are keyed by a stable hash of the cadastral number, so repeated
+    calls return identical data. Risk profile is driven by the last digit:
+    even -> clean, odd -> 1-2 encumbrances, ending 0 or 5 -> critical stop-factor.
+    See :mod:`app.mock_data` for the generation logic.
+    """
 
     async def get_plot(self, cadastral_number: str) -> PlotData:
+        payload = mock_build_plot_payload(cadastral_number)
         return PlotData(
-            cadastral_number=cadastral_number,
-            address=f"Московская область, тест, уч. {cadastral_number[-4:]}",
-            area=round(random.uniform(0.5, 50.0), 2),
-            category="Земли сельскохозяйственного назначения",
-            allowed_use="Для ведения крестьянского (фермерского) хозяйства",
-            owner_type="",
-            lat=55.7 + random.uniform(-0.5, 0.5),
-            lng=37.6 + random.uniform(-1.0, 1.0),
-            price=round(random.uniform(500_000, 15_000_000), 0),
-            status="Учтенный",
-            raw_json={"source": "mock", "cadastral_number": cadastral_number},
+            cadastral_number=payload["cadastral_number"],
+            address=payload["address"],
+            area=payload["area"],
+            category=payload["category"],
+            allowed_use=payload["allowed_use"],
+            owner_type=payload["owner_type"],
+            lat=payload["lat"],
+            lng=payload["lng"],
+            price=payload["price"],
+            status=payload["status"],
+            raw_json=payload["raw_json"],
         )
 
     async def get_plot_by_coordinates(self, lat: float, lng: float, radius_m: float = 2.0) -> PlotData:
-        cadastral_number = f"50:21:{abs(hash((round(lat, 5), round(lng, 5)))) % 10_000_000:07d}:1"
+        cadastral_number = f"50:21:{stable_hash(f'{round(lat, 5)}:{round(lng, 5)}') % 10_000_000:07d}:1"
         plot = await self.get_plot(cadastral_number)
         plot.lat = lat
         plot.lng = lng
-        plot.raw_json = {
-            "source": "mock",
-            "lat": lat,
-            "lng": lng,
-            "radius_m": radius_m,
-            "note": "Mock coordinate lookup. Set ROSREESTR_MODE=real for NSPD lookup.",
-        }
+        # Recentre the mock parcel polygon on the requested coordinates.
+        plot.raw_json = mock_build_plot_payload(cadastral_number)["raw_json"]
+        plot.raw_json.update(
+            {
+                "lat": lat,
+                "lng": lng,
+                "radius_m": radius_m,
+                "note": "Mock coordinate lookup. Set ROSREESTR_MODE=real for NSPD lookup.",
+            }
+        )
         return plot
 
     async def get_egrn(self, cadastral_number: str) -> EGRNData:
+        payload = mock_build_egrn_payload(cadastral_number)
         return EGRNData(
-            cadastral_number=cadastral_number,
-            owner="",
-            encumbrances=[],
-            registration_date="",
-            raw_json={
-                "source": "mock",
-                "note": "Official EGRN extracts require a separate authorized Rosreestr/Gosuslugi request.",
-            },
+            cadastral_number=payload["cadastral_number"],
+            owner=payload["owner"],
+            encumbrances=payload["encumbrances"],
+            registration_date=payload["registration_date"],
+            raw_json=payload["raw_json"],
         )
 
 

@@ -41,4 +41,12 @@ class ParallelGroup:
     async def run(self, ctx: AgentContext) -> list[AgentResult]:
         import asyncio
         tasks = [agent.run({}, ctx) for agent in self.agents]
-        return await asyncio.gather(*tasks, return_exceptions=False)
+        # Isolate failures: one agent raising must never abort the whole group/pipeline.
+        raw = await asyncio.gather(*tasks, return_exceptions=True)
+        results: list[AgentResult] = []
+        for agent, item in zip(self.agents, raw):
+            if isinstance(item, BaseException):
+                results.append(AgentResult(success=False, data={}, error=f"{type(item).__name__}: {item}"))
+            else:
+                results.append(item)
+        return results

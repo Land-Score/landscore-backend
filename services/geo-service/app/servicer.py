@@ -7,6 +7,12 @@ from typing import Any
 
 import grpc
 
+from app.geo_analysis import (
+    analyze_location,
+    check_protected_zones,
+    compute_distances,
+    synthesize_plots,
+)
 from app.restrictions.calculator import calculate_land_use_restrictions
 from app.restrictions.models import AgriculturalLandUseLayer, RealEstateObject, RestrictionAnalysisRequest, RestrictionLayer
 
@@ -47,24 +53,61 @@ class GeoServicer:
     """Implements geo.proto GeoService business logic."""
 
     async def AnalyzePlotLocation(self, request, context):
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Location analysis is not wired yet")
-        return _message_or_dict("LocationAnalysis", {})
+        analysis = analyze_location(
+            lat=request.lat,
+            lng=request.lng,
+            cadastral_number=getattr(request, "cadastral_number", "") or "",
+        )
+        return _message_or_dict(
+            "LocationAnalysis",
+            {
+                "distance_to_city_km": analysis["distance_to_city_km"],
+                "distance_to_road_km": analysis["distance_to_road_km"],
+                "distance_to_railway_km": analysis["distance_to_railway_km"],
+                "has_road_access": analysis["has_road_access"],
+                "has_electricity": analysis["has_electricity"],
+                "has_gas": analysis["has_gas"],
+                "has_water": analysis["has_water"],
+                "protected_zones": analysis["protected_zones"],
+                "region": analysis["region"],
+                "district": analysis["district"],
+                "locality": analysis["locality"],
+                "accessibility_score": analysis["accessibility_score"],
+                "raw_json": json.dumps(analysis["raw"], ensure_ascii=False),
+            },
+        )
 
     async def SearchPlotsByArea(self, request, context):
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Area search requires PostGIS index")
-        return _message_or_dict("AreaSearchResponse", {"plots": []})
+        plots = synthesize_plots(
+            center_lat=request.center_lat,
+            center_lng=request.center_lng,
+            radius_km=request.radius_km,
+            region=getattr(request, "region", "") or "",
+            limit=request.limit,
+        )
+        return _message_or_dict(
+            "AreaSearchResponse",
+            {"plots": [_message_or_dict("PlotGeo", plot) for plot in plots]},
+        )
 
     async def GetDistances(self, request, context):
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Distance service is not wired yet")
-        return _message_or_dict("DistanceResponse", {"distances_km": {}})
+        distances = compute_distances(
+            lat=request.from_lat,
+            lng=request.from_lng,
+            poi_types=list(request.to_poi_types),
+        )
+        return _message_or_dict("DistanceResponse", {"distances_km": distances})
 
     async def CheckProtectedZones(self, request, context):
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("Protected zone point lookup is not wired yet")
-        return _message_or_dict("ZoneResponse", {"zone_types": [], "is_restricted": False, "details_json": "{}"})
+        result = check_protected_zones(lat=request.lat, lng=request.lng)
+        return _message_or_dict(
+            "ZoneResponse",
+            {
+                "zone_types": result["zone_types"],
+                "is_restricted": result["is_restricted"],
+                "details_json": json.dumps(result["details"], ensure_ascii=False),
+            },
+        )
 
     async def AnalyzeLandUseRestrictions(self, request, context):
         try:

@@ -76,9 +76,11 @@ class MarketAgent(Agent):
         avg_sqm = _to_float(analysis.get("avg_price_per_sqm"))
         estimated_market_value = round(area * median_sqm) if area and median_sqm else 0
 
+        cadastral_ppsqm = round(asking_price / area, 2) if (asking_price and area) else 0
         summary = {
             "available": True,
             "region": region,
+            "cadastral_price_per_sqm": cadastral_ppsqm,
             "median_price_per_sqm": median_sqm,
             "avg_price_per_sqm": avg_sqm,
             "comparables_count": int(_to_float(analysis.get("comparables_count"))),

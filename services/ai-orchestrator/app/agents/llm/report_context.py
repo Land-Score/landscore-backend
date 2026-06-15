@@ -143,12 +143,14 @@ def build_report_context(ctx: AgentContext) -> dict[str, Any]:
         "map_summary": map_summary,
         "soil_summary": _soil_summary(soil) if soil else {},
         "infrastructure_summary": _infrastructure_summary(infrastructure) if infrastructure else {},
-        "market_summary": {
+        # Prefer the MarketAgent's real analysis (market-service: cadastral anchor +
+        # live torgi.gov.ru comparables). Fall back to the dataset's market_json note.
+        "market_summary": (ctx.get("market_summary") or {
             "source": market.get("source"),
             "success": market.get("success"),
             "items_count": market.get("itemsCount") or market.get("items_count"),
             "limitations": market.get("limitations") or [],
-        } if market else {},
+        }) if (ctx.get("market_summary") or market) else {},
         "agent_outputs": {
             "legal": ctx.get("LegalAgent"),
             "land_use": ctx.get("LandUseAgent"),

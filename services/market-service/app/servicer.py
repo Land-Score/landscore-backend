@@ -6,9 +6,11 @@ import sys
 from typing import Any
 
 import grpc
+import statistics
 import structlog
 
 from app.clickhouse_client import get_client
+from app.torgi_client import fetch_land_comparables
 
 PROTO_GEN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "proto_gen"))
 if PROTO_GEN_DIR not in sys.path:
@@ -118,39 +120,62 @@ class MarketServicer:
         area = float(request.area or 0.0)
         asking_price = float(request.asking_price or 0.0)
 
+        # Cadastral ₽/m² — the real, official anchor (государственная кадастровая
+        # стоимость from НСПД, passed in as asking_price). Always our base signal.
+        cadastral_ppsqm = (asking_price / area) if (asking_price > 0 and area > 0) else 0.0
+
+        # 1) Real live comparables from torgi.gov.ru (best-effort; sparse for land).
         try:
-            agg = await asyncio.to_thread(self.ch.analysis_aggregates, region, category, allowed_use)
-            buckets = await asyncio.to_thread(self.ch.trend_buckets, region, category)
-        except Exception as exc:  # noqa: BLE001
-            context.set_code(grpc.StatusCode.UNAVAILABLE)
-            context.set_details(f"ClickHouse query failed: {exc}")
-            return _message_or_dict("MarketAnalysis", {})
+            comps = await asyncio.to_thread(fetch_land_comparables, region=region, category=category, allowed_use=allowed_use)
+        except Exception as exc:  # noqa: BLE001 - never fail the RPC on the live source
+            log.warning("torgi_unavailable", error=str(exc))
+            comps = []
+        ppsqm_values = sorted(c["price_per_sqm"] for c in comps if c.get("price_per_sqm", 0) > 0)
 
-        # If allowed_use filtering yields too few rows, fall back to region+category.
-        if agg["total_count"] < 5 and allowed_use:
-            agg = await asyncio.to_thread(self.ch.analysis_aggregates, region, category, "")
-
-        median_ppsqm = agg["median"]
-        avg_ppsqm = agg["avg"]
-        count = agg["total_count"]
-
-        asking_ppsqm = (asking_price / area) if (asking_price > 0 and area > 0) else 0.0
-        assessment, deviation = _price_assessment(asking_ppsqm, median_ppsqm)
-        activity = _market_activity(agg["total_count"], agg["recent_count"])
-        trend = _trend(buckets["recent_median"], buckets["older_median"])
-        commentary = _commentary(assessment, deviation, count, activity, trend)
+        if len(ppsqm_values) >= 3:
+            # Real market median from live torgi comparables.
+            median_ppsqm = round(statistics.median(ppsqm_values), 2)
+            avg_ppsqm = round(sum(ppsqm_values) / len(ppsqm_values), 2)
+            count = len(ppsqm_values)
+            source = "torgi.gov.ru (госимущество)"
+            assessment, deviation = _price_assessment(cadastral_ppsqm, median_ppsqm)
+            activity = _market_activity(count, count)
+            trend = "стабильно"
+            commentary = (
+                f"Рыночный ориентир рассчитан по {count} реальным лотам torgi.gov.ru "
+                f"(медиана {median_ppsqm:,.0f} ₽/м²). Кадастровая стоимость — "
+                f"{cadastral_ppsqm:,.0f} ₽/м². {_commentary(assessment, deviation, count, activity, trend)}"
+            ).replace(",", " ")
+        else:
+            # No live comparables -> present the real cadastral valuation as the reference.
+            median_ppsqm = round(cadastral_ppsqm, 2)
+            avg_ppsqm = round(cadastral_ppsqm, 2)
+            count = len(ppsqm_values)
+            source = "Государственная кадастровая стоимость (НСПД)"
+            assessment = "оценка по кадастровой стоимости" if cadastral_ppsqm > 0 else "недостаточно данных"
+            deviation = 0.0
+            activity = "нет данных" if not comps else "низкая"
+            trend = "стабильно"
+            if cadastral_ppsqm > 0:
+                commentary = (
+                    f"Рыночная стоимость оценена по государственной кадастровой стоимости: "
+                    f"{cadastral_ppsqm:,.0f} ₽/м² ({cadastral_ppsqm * 100:,.0f} ₽/сотка). "
+                    f"Активные рыночные аналоги по региону в открытых источниках (torgi.gov.ru) не найдены."
+                ).replace(",", " ")
+            else:
+                commentary = "Недостаточно данных: не задана кадастровая стоимость и не найдены рыночные аналоги."
 
         return _message_or_dict(
             "MarketAnalysis",
             {
-                "median_price_per_sqm": round(median_ppsqm, 2),
-                "avg_price_per_sqm": round(avg_ppsqm, 2),
+                "median_price_per_sqm": median_ppsqm,
+                "avg_price_per_sqm": avg_ppsqm,
                 "comparables_count": count,
                 "price_assessment": assessment,
                 "price_deviation_pct": deviation,
                 "market_activity": activity,
                 "trend": trend,
-                "llm_commentary": commentary,
+                "llm_commentary": f"Источник: {source}. {commentary}",
             },
         )
 
@@ -161,14 +186,28 @@ class MarketServicer:
         area_max = float(request.area_max or 0.0)
         limit = int(request.limit or 0) or 20
 
+        # Prefer real live comparables from torgi.gov.ru.
         try:
-            rows = await asyncio.to_thread(
-                self.ch.comparables, region, category, area_min, area_max, limit
-            )
-        except Exception as exc:  # noqa: BLE001
-            context.set_code(grpc.StatusCode.UNAVAILABLE)
-            context.set_details(f"ClickHouse query failed: {exc}")
-            return _message_or_dict("ComparablesResponse", {"comparables": []})
+            live = await asyncio.to_thread(fetch_land_comparables, region=region, category=category)
+        except Exception:  # noqa: BLE001
+            live = []
+        rows = [
+            {
+                "id": c["id"], "address": c["address"], "area": c["area"], "price": c["price"],
+                "price_per_sqm": c["price_per_sqm"], "source": c["source"], "listed_at": c["listed_at"],
+            }
+            for c in live
+            if (not area_min or c["area"] >= area_min) and (not area_max or c["area"] <= area_max)
+        ][:limit]
+
+        # Fall back to the labeled synthetic regional estimate only if no live data.
+        if not rows:
+            try:
+                rows = await asyncio.to_thread(self.ch.comparables, region, category, area_min, area_max, limit)
+            except Exception as exc:  # noqa: BLE001
+                context.set_code(grpc.StatusCode.UNAVAILABLE)
+                context.set_details(f"ClickHouse query failed: {exc}")
+                return _message_or_dict("ComparablesResponse", {"comparables": []})
 
         return _message_or_dict("ComparablesResponse", {"comparables": rows})
 

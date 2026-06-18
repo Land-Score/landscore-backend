@@ -6,6 +6,7 @@ from typing import Any
 import grpc
 from google.protobuf.empty_pb2 import Empty
 from sqlalchemy import desc, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import check_pb2
 import check_pb2_grpc
@@ -99,7 +100,7 @@ def _compact_report_for_client(report_json: dict[str, Any] | None) -> dict[str, 
         if key in report
     }
     compact["spatial_layers"] = {
-        "cadastral_number": spatial.get("cadastral_number") or report.get("plot", {}).get("cadastral_number"),
+        "cadastral_number": spatial.get("cadastral_number") or (report.get("plot") or {}).get("cadastral_number"),
         "parcel_geometry_geojson": spatial.get("parcel_geometry_geojson") or "{}",
         "restriction_layers": _compact_layers_for_client(spatial.get("restriction_layers")),
         "land_use_layers": _compact_layers_for_client(spatial.get("land_use_layers")),
@@ -138,7 +139,12 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
 
     async def CreateCheck(self, request, context):
         user_id = await _parse_uuid(request.user_id, "user_id", context)
-        if not request.cadastral_number and not request.address and not (request.lat and request.lng):
+        # proto3 scalars have no presence: lat/lng default to 0.0 when unset, so a
+        # valid equator/prime-meridian coordinate is indistinguishable from "missing".
+        # Treat coords as a locator whenever at least one component is non-zero, and
+        # accept the values as given (0.0 stays 0.0 — never coerced to NULL).
+        has_coords = bool(request.lat) or bool(request.lng)
+        if not request.cadastral_number and not request.address and not has_coords:
             await context.abort(
                 grpc.StatusCode.INVALID_ARGUMENT,
                 "cadastral_number, address or lat+lng is required",
@@ -151,8 +157,8 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
                 status=CheckStatus.PENDING,
                 cadastral_number=request.cadastral_number or None,
                 address=request.address or None,
-                lat=request.lat or None,
-                lng=request.lng or None,
+                lat=request.lat,
+                lng=request.lng,
                 purpose=request.purpose or "",
             )
             session.add(check)
@@ -170,11 +176,14 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
             }
             try:
                 enqueue_check(payload)
-            except Exception as exc:
+            except Exception:
+                # The row is already committed; if enqueue fails we must still
+                # return the check_id so the client can poll and observe the
+                # FAILED state instead of being left with an orphan row.
                 check.status = CheckStatus.FAILED
                 check.completed_at = datetime.utcnow()
                 await session.commit()
-                await context.abort(grpc.StatusCode.UNAVAILABLE, f"failed to enqueue check: {exc}")
+                await session.refresh(check)
 
             return _check_response(check)
 
@@ -259,33 +268,47 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "agent_name is required")
 
         now = datetime.utcnow()
+        status = request.status or StepStatus.RUNNING
+        progress_pct = min(max(request.progress_pct, 0), 100)
+        output_json = _json_loads(request.output_json)
+        is_active = status in {StepStatus.RUNNING, StepStatus.DONE, StepStatus.FAILED}
+        is_finished = status in {StepStatus.DONE, StepStatus.FAILED}
+        started_at = now if is_active else None
+        completed_at = now if is_finished else None
+
         async with AsyncSessionLocal() as session:
             check = await session.get(LandCheck, check_id)
             if check is None:
                 await context.abort(grpc.StatusCode.NOT_FOUND, "check not found")
 
-            step = await session.scalar(
-                select(CheckStep).where(
-                    CheckStep.check_id == check_id,
-                    CheckStep.agent_name == request.agent_name,
-                )
+            # Atomic upsert: the unique index on (check_id, agent_name) means a
+            # concurrent read-modify-insert would race into an IntegrityError.
+            # ON CONFLICT DO UPDATE keeps the operation a single statement.
+            stmt = pg_insert(CheckStep).values(
+                id=uuid.uuid4(),
+                check_id=check_id,
+                agent_name=request.agent_name,
+                status=status,
+                progress_pct=progress_pct,
+                output_json=output_json,
+                started_at=started_at,
+                completed_at=completed_at,
             )
-            if step is None:
-                step = CheckStep(
-                    id=uuid.uuid4(),
-                    check_id=check_id,
-                    agent_name=request.agent_name,
-                    started_at=now,
-                )
-                session.add(step)
-
-            step.status = request.status or StepStatus.RUNNING
-            step.progress_pct = min(max(request.progress_pct, 0), 100)
-            step.output_json = _json_loads(request.output_json)
-            if step.started_at is None and step.status in {StepStatus.RUNNING, StepStatus.DONE, StepStatus.FAILED}:
-                step.started_at = now
-            if step.status in {StepStatus.DONE, StepStatus.FAILED}:
-                step.completed_at = now
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["check_id", "agent_name"],
+                set_={
+                    "status": status,
+                    "progress_pct": progress_pct,
+                    "output_json": output_json,
+                    # Preserve the first start time; only backfill if still NULL.
+                    "started_at": func.coalesce(CheckStep.started_at, stmt.excluded.started_at),
+                    # Stamp completion when finished; otherwise keep prior value.
+                    "completed_at": (
+                        stmt.excluded.completed_at if is_finished else CheckStep.completed_at
+                    ),
+                },
+            )
+            await session.execute(stmt)
 
             if check.status == CheckStatus.PENDING:
                 check.status = CheckStatus.PROCESSING
@@ -353,11 +376,17 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
                 next_steps=[],
             )
 
-        merged = {**geo_meta, **_compact_report_for_client(result.report_json)}
+        # Any malformed report_json must degrade gracefully rather than raise
+        # gRPC INTERNAL: fall back to the raw report, then to the geo-only stub.
         try:
+            merged = {**geo_meta, **_compact_report_for_client(result.report_json)}
             report_str = json.dumps(merged, ensure_ascii=False)
-        except (TypeError, ValueError):
-            report_str = json.dumps(geo_meta, ensure_ascii=False)
+        except (TypeError, ValueError, AttributeError, KeyError):
+            try:
+                raw = result.report_json if isinstance(result.report_json, dict) else {}
+                report_str = json.dumps({**geo_meta, **raw}, ensure_ascii=False)
+            except (TypeError, ValueError):
+                report_str = json.dumps(geo_meta, ensure_ascii=False)
 
         return check_pb2.CheckReportResponse(
             check_id=str(check.id),

@@ -7,7 +7,7 @@ import structlog
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from passlib.context import CryptContext
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 import auth_pb2
@@ -27,6 +27,13 @@ MAIN_TASKS = {"land_plot_selection", "land_check", "portfolio"}
 RISK_TOLERANCES = {"low", "medium", "high"}
 PREFERRED_SCENARIOS = {"construction", "agriculture", "resale", "development"}
 
+# Допустимые роли пользователя (RBAC).
+ROLES = {"user", "admin"}
+
+# Пагинация ListUsers: значения по умолчанию и предельный размер страницы.
+DEFAULT_LIST_LIMIT = 50
+MAX_LIST_LIMIT = 200
+
 # Ограничения длины строковых полей (должны совпадать с models.py).
 MAX_NAME_LEN = 255
 MAX_REGION_LEN = 255
@@ -43,10 +50,10 @@ def _now() -> datetime:
     return datetime.utcnow()
 
 
-def _make_access_token(user_id: str, email: str) -> str:
+def _make_access_token(user_id: str, email: str, role: str = "user") -> str:
     expire = _now() + timedelta(minutes=settings.jwt_access_ttl_minutes)
     return jwt.encode(
-        {"sub": user_id, "email": email, "exp": expire},
+        {"sub": user_id, "email": email, "role": role, "exp": expire},
         settings.jwt_secret,
         algorithm=settings.jwt_algorithm,
     )
@@ -62,6 +69,13 @@ def _hash_token(token: str) -> str:
 
 def _clean_email(email: str) -> str:
     return email.lower().strip()
+
+
+def _maybe_promote_admin(user: User) -> None:
+    """Если email пользователя входит в ADMIN_EMAILS, гарантирует роль admin.
+    Изменяет объект на месте; вызывающий код сохраняет сессию."""
+    if user.email in settings.admin_emails and user.role != "admin":
+        user.role = "admin"
 
 
 def _validate_profile_fields(
@@ -115,6 +129,21 @@ def _build_profile_pb(user: User, profile: UserProfile) -> auth_pb2.UserProfile:
         organization=profile.organization,
         budget=float(profile.budget or 0.0),
         created_at=user.created_at.isoformat(),
+        role=user.role,
+        is_active=bool(user.is_active),
+    )
+
+
+def _build_admin_user_pb(user: User, profile: UserProfile | None) -> auth_pb2.AdminUser:
+    return auth_pb2.AdminUser(
+        user_id=str(user.id),
+        email=user.email,
+        name=user.name,
+        role=user.role,
+        is_active=bool(user.is_active),
+        client_type=profile.client_type if profile else "",
+        region=profile.region if profile else "",
+        created_at=user.created_at.isoformat(),
     )
 
 
@@ -149,7 +178,7 @@ async def _cleanup_refresh_tokens(session, user_id) -> None:
 
 
 async def _issue_tokens(session, user: User, profile: UserProfile) -> auth_pb2.AuthResponse:
-    access_token = _make_access_token(str(user.id), user.email)
+    access_token = _make_access_token(str(user.id), user.email, user.role)
     raw_refresh = _make_raw_refresh()
     token_hash = _hash_token(raw_refresh)
     expires_at = _now() + timedelta(days=settings.jwt_refresh_ttl_days)
@@ -170,6 +199,8 @@ async def _issue_tokens(session, user: User, profile: UserProfile) -> auth_pb2.A
         refresh_token=raw_refresh,
         token_type="bearer",
         profile=_build_profile_pb(user, profile),
+        role=user.role,
+        is_active=bool(user.is_active),
     )
 
 
@@ -230,6 +261,7 @@ class AuthServicer(auth_pb2_grpc.AuthServiceServicer):
                     email=email,
                     name=name,
                     password_hash=pwd_context.hash(request.password),
+                    role="admin" if email in settings.admin_emails else "user",
                 )
                 session.add(user)
                 await session.flush()
@@ -262,6 +294,13 @@ class AuthServicer(auth_pb2_grpc.AuthServiceServicer):
             if not user or not pwd_context.verify(request.password, user.password_hash):
                 await context.abort(grpc.StatusCode.UNAUTHENTICATED, "Invalid email or password")
                 return
+
+            if not user.is_active:
+                await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Аккаунт заблокирован")
+                return
+
+            # Авто-повышение до admin, если email добавлен в ADMIN_EMAILS.
+            _maybe_promote_admin(user)
 
             profile = await _get_or_create_profile(session, user.id)
 
@@ -336,10 +375,16 @@ class AuthServicer(auth_pb2_grpc.AuthServiceServicer):
         if not user:
             return auth_pb2.ValidateResponse(valid=False)
 
+        # Заблокированный аккаунт считаем невалидным даже при корректном токене.
+        if not user.is_active:
+            return auth_pb2.ValidateResponse(valid=False)
+
         return auth_pb2.ValidateResponse(
             valid=True,
             user_id=user_id,
             email=email or user.email,
+            role=user.role,
+            is_active=bool(user.is_active),
         )
 
     async def GetProfile(self, request, context):
@@ -417,3 +462,150 @@ class AuthServicer(auth_pb2_grpc.AuthServiceServicer):
             await session.commit()
             await session.refresh(profile)
             return _build_profile_pb(user, profile)
+
+    # ── Admin / RBAC ──────────────────────────────────────
+
+    async def ListUsers(self, request, context):
+        limit = request.limit if request.limit > 0 else DEFAULT_LIST_LIMIT
+        limit = min(limit, MAX_LIST_LIMIT)
+        offset = request.offset if request.offset > 0 else 0
+        query = (request.query or "").strip().lower()
+
+        async with AsyncSessionLocal() as session:
+            count_stmt = select(func.count()).select_from(User)
+            list_stmt = select(User, UserProfile).outerjoin(
+                UserProfile, UserProfile.user_id == User.id
+            )
+
+            if query:
+                pattern = f"%{query}%"
+                # email хранится в lowercase; имя приводим к нижнему регистру при сравнении.
+                condition = or_(
+                    User.email.like(pattern),
+                    func.lower(User.name).like(pattern),
+                )
+                count_stmt = count_stmt.where(condition)
+                list_stmt = list_stmt.where(condition)
+
+            total = (await session.execute(count_stmt)).scalar_one()
+
+            list_stmt = list_stmt.order_by(User.created_at.desc()).limit(limit).offset(offset)
+            rows = (await session.execute(list_stmt)).all()
+
+            users = [_build_admin_user_pb(user, profile) for user, profile in rows]
+            return auth_pb2.ListUsersResponse(users=users, total=int(total))
+
+    async def UpdateUserRole(self, request, context):
+        if not request.user_id:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "user_id is required")
+            return
+
+        try:
+            user_uuid = uuid.UUID(request.user_id)
+        except ValueError:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid user_id format")
+            return
+
+        role = (request.role or "").strip().lower()
+        if role not in ROLES:
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                f"недопустимое значение role: {request.role}",
+            )
+            return
+
+        async with AsyncSessionLocal() as session:
+            user_result = await session.execute(select(User).where(User.id == user_uuid))
+            user = user_result.scalar_one_or_none()
+            if not user:
+                await context.abort(grpc.StatusCode.NOT_FOUND, "User not found")
+                return
+
+            user.role = role
+            profile = await _get_or_create_profile(session, user_uuid)
+            await session.commit()
+            log.info("user_role_updated", user_id=str(user.id), role=role)
+            return _build_admin_user_pb(user, profile)
+
+    async def SetUserActive(self, request, context):
+        if not request.user_id:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "user_id is required")
+            return
+
+        try:
+            user_uuid = uuid.UUID(request.user_id)
+        except ValueError:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid user_id format")
+            return
+
+        async with AsyncSessionLocal() as session:
+            user_result = await session.execute(select(User).where(User.id == user_uuid))
+            user = user_result.scalar_one_or_none()
+            if not user:
+                await context.abort(grpc.StatusCode.NOT_FOUND, "User not found")
+                return
+
+            user.is_active = bool(request.is_active)
+
+            # При блокировке аккаунта отзываем все активные refresh-токены,
+            # чтобы пользователь не мог продлить сессию.
+            if not user.is_active:
+                await session.execute(
+                    delete(RefreshToken).where(RefreshToken.user_id == user_uuid)
+                )
+
+            profile = await _get_or_create_profile(session, user_uuid)
+            await session.commit()
+            log.info("user_active_set", user_id=str(user.id), is_active=user.is_active)
+            return _build_admin_user_pb(user, profile)
+
+    async def DeleteUser(self, request, context):
+        if not request.user_id:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "user_id is required")
+            return
+
+        try:
+            user_uuid = uuid.UUID(request.user_id)
+        except ValueError:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "invalid user_id format")
+            return
+
+        async with AsyncSessionLocal() as session:
+            user_result = await session.execute(select(User).where(User.id == user_uuid))
+            user = user_result.scalar_one_or_none()
+            if not user:
+                await context.abort(grpc.StatusCode.NOT_FOUND, "User not found")
+                return
+
+            # Явно чистим связанные данные (на случай отсутствия каскада в БД).
+            await session.execute(
+                delete(RefreshToken).where(RefreshToken.user_id == user_uuid)
+            )
+            await session.execute(
+                delete(UserProfile).where(UserProfile.user_id == user_uuid)
+            )
+            await session.execute(delete(User).where(User.id == user_uuid))
+            await session.commit()
+            log.info("user_deleted", user_id=request.user_id)
+            return auth_pb2.DeleteUserResponse(success=True)
+
+    async def CountUsers(self, request, context):
+        async with AsyncSessionLocal() as session:
+            total = (
+                await session.execute(select(func.count()).select_from(User))
+            ).scalar_one()
+            admins = (
+                await session.execute(
+                    select(func.count()).select_from(User).where(User.role == "admin")
+                )
+            ).scalar_one()
+            active = (
+                await session.execute(
+                    select(func.count()).select_from(User).where(User.is_active.is_(True))
+                )
+            ).scalar_one()
+            return auth_pb2.CountUsersResponse(
+                total=int(total),
+                admins=int(admins),
+                active=int(active),
+            )

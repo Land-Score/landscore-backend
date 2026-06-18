@@ -5,7 +5,7 @@ import warnings
 
 import auth_pb2 as auth__pb2
 
-GRPC_GENERATED_VERSION = '1.80.0'
+GRPC_GENERATED_VERSION = '1.81.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class AuthServiceStub(object):
+class AuthServiceStub:
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -64,9 +64,34 @@ class AuthServiceStub(object):
                 request_serializer=auth__pb2.UpdateProfileRequest.SerializeToString,
                 response_deserializer=auth__pb2.UserProfile.FromString,
                 _registered_method=True)
+        self.ListUsers = channel.unary_unary(
+                '/auth.AuthService/ListUsers',
+                request_serializer=auth__pb2.ListUsersRequest.SerializeToString,
+                response_deserializer=auth__pb2.ListUsersResponse.FromString,
+                _registered_method=True)
+        self.UpdateUserRole = channel.unary_unary(
+                '/auth.AuthService/UpdateUserRole',
+                request_serializer=auth__pb2.UpdateUserRoleRequest.SerializeToString,
+                response_deserializer=auth__pb2.AdminUser.FromString,
+                _registered_method=True)
+        self.SetUserActive = channel.unary_unary(
+                '/auth.AuthService/SetUserActive',
+                request_serializer=auth__pb2.SetUserActiveRequest.SerializeToString,
+                response_deserializer=auth__pb2.AdminUser.FromString,
+                _registered_method=True)
+        self.DeleteUser = channel.unary_unary(
+                '/auth.AuthService/DeleteUser',
+                request_serializer=auth__pb2.DeleteUserRequest.SerializeToString,
+                response_deserializer=auth__pb2.DeleteUserResponse.FromString,
+                _registered_method=True)
+        self.CountUsers = channel.unary_unary(
+                '/auth.AuthService/CountUsers',
+                request_serializer=auth__pb2.CountUsersRequest.SerializeToString,
+                response_deserializer=auth__pb2.CountUsersResponse.FromString,
+                _registered_method=True)
 
 
-class AuthServiceServicer(object):
+class AuthServiceServicer:
     """Missing associated documentation comment in .proto file."""
 
     def Register(self, request, context):
@@ -105,6 +130,37 @@ class AuthServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ListUsers(self, request, context):
+        """Admin / RBAC
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdateUserRole(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetUserActive(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteUser(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CountUsers(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AuthServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -138,6 +194,31 @@ def add_AuthServiceServicer_to_server(servicer, server):
                     request_deserializer=auth__pb2.UpdateProfileRequest.FromString,
                     response_serializer=auth__pb2.UserProfile.SerializeToString,
             ),
+            'ListUsers': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListUsers,
+                    request_deserializer=auth__pb2.ListUsersRequest.FromString,
+                    response_serializer=auth__pb2.ListUsersResponse.SerializeToString,
+            ),
+            'UpdateUserRole': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateUserRole,
+                    request_deserializer=auth__pb2.UpdateUserRoleRequest.FromString,
+                    response_serializer=auth__pb2.AdminUser.SerializeToString,
+            ),
+            'SetUserActive': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetUserActive,
+                    request_deserializer=auth__pb2.SetUserActiveRequest.FromString,
+                    response_serializer=auth__pb2.AdminUser.SerializeToString,
+            ),
+            'DeleteUser': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteUser,
+                    request_deserializer=auth__pb2.DeleteUserRequest.FromString,
+                    response_serializer=auth__pb2.DeleteUserResponse.SerializeToString,
+            ),
+            'CountUsers': grpc.unary_unary_rpc_method_handler(
+                    servicer.CountUsers,
+                    request_deserializer=auth__pb2.CountUsersRequest.FromString,
+                    response_serializer=auth__pb2.CountUsersResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'auth.AuthService', rpc_method_handlers)
@@ -146,7 +227,7 @@ def add_AuthServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class AuthService(object):
+class AuthService:
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -301,6 +382,141 @@ class AuthService(object):
             '/auth.AuthService/UpdateProfile',
             auth__pb2.UpdateProfileRequest.SerializeToString,
             auth__pb2.UserProfile.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListUsers(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/auth.AuthService/ListUsers',
+            auth__pb2.ListUsersRequest.SerializeToString,
+            auth__pb2.ListUsersResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateUserRole(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/auth.AuthService/UpdateUserRole',
+            auth__pb2.UpdateUserRoleRequest.SerializeToString,
+            auth__pb2.AdminUser.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetUserActive(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/auth.AuthService/SetUserActive',
+            auth__pb2.SetUserActiveRequest.SerializeToString,
+            auth__pb2.AdminUser.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteUser(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/auth.AuthService/DeleteUser',
+            auth__pb2.DeleteUserRequest.SerializeToString,
+            auth__pb2.DeleteUserResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CountUsers(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/auth.AuthService/CountUsers',
+            auth__pb2.CountUsersRequest.SerializeToString,
+            auth__pb2.CountUsersResponse.FromString,
             options,
             channel_credentials,
             insecure,

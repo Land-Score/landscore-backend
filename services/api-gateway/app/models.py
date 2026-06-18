@@ -39,6 +39,8 @@ class UserProfileResponse(BaseModel):
     user_id: str
     email: str
     name: str
+    role: str = Field("user", description="user | admin")
+    is_active: bool = True
     client_type: str
     main_task: str
     region: str
@@ -353,3 +355,90 @@ class HealthResponse(BaseModel):
     status: str = Field(description="ok | degraded")
     version: str
     services: list[ServiceHealthItem]
+
+
+# ── Admin ────────────────────────────────────────────────────────────────────
+
+class AdminUserResponse(BaseModel):
+    user_id: str
+    email: str
+    name: str
+    role: str = Field(description="user | admin")
+    is_active: bool
+    client_type: str = ""
+    region: str = ""
+    created_at: str
+
+
+class AdminListUsersResponse(BaseModel):
+    users: list[AdminUserResponse]
+    total: int
+
+
+class UpdateUserRoleRequest(BaseModel):
+    role: str = Field(description="admin | user", examples=["admin"])
+
+
+class SetUserActiveRequest(BaseModel):
+    is_active: bool = Field(examples=[False])
+
+
+class AdminSuccessResponse(BaseModel):
+    success: bool = True
+
+
+class AdminUsersStats(BaseModel):
+    total: int = 0
+    admins: int = 0
+    active: int = 0
+
+
+class AdminChecksStats(BaseModel):
+    total: int = 0
+    completed: int = 0
+    processing: int = 0
+    failed: int = 0
+    pending: int = 0
+
+
+class AdminSearchesStats(BaseModel):
+    total: int = 0
+    completed: int = 0
+    processing: int = 0
+    failed: int = 0
+    pending: int = 0
+    awaiting_confirmation: int = 0
+
+
+class AdminStatsResponse(BaseModel):
+    users: AdminUsersStats
+    checks: AdminChecksStats
+    searches: AdminSearchesStats
+
+
+class AdminCheckItem(BaseModel):
+    check_id: str
+    user_id: str
+    status: str
+    cadastral_number: str | None = None
+    address: str | None = None
+    created_at: str
+    completed_at: str | None = None
+
+
+class AdminListChecksResponse(BaseModel):
+    checks: list[AdminCheckItem]
+    total: int
+
+
+class AdminSearchItem(BaseModel):
+    search_id: str
+    user_id: str
+    status: str
+    query: str
+    created_at: str
+
+
+class AdminListSearchesResponse(BaseModel):
+    searches: list[AdminSearchItem]
+    total: int

@@ -15,6 +15,8 @@ def _profile_from_proto(p) -> UserProfileResponse:
         user_id=p.user_id,
         email=p.email,
         name=p.name,
+        role=getattr(p, "role", "") or "user",
+        is_active=getattr(p, "is_active", True),
         client_type=p.client_type,
         main_task=p.main_task,
         region=p.region,

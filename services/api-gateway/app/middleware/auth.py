@@ -80,4 +80,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         request.state.user_id = result.user_id
         request.state.email = result.email
+        # JWT carries a "role" claim; ValidateToken surfaces it. Default to "user"
+        # so older tokens / responses without the field стают обычными пользователями.
+        request.state.role = getattr(result, "role", "") or "user"
+        request.state.is_active = getattr(result, "is_active", True)
         return await call_next(request)

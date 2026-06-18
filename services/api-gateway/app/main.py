@@ -16,7 +16,7 @@ from app.config import settings
 from app.middleware.auth import AuthMiddleware
 from app.models import HealthResponse, ServiceHealthItem
 from app.ratelimit import limiter
-from app.routers import alice, auth, cadastral, checks, searches, documents
+from app.routers import admin, alice, auth, cadastral, checks, searches, documents
 
 log = structlog.get_logger()
 
@@ -117,6 +117,7 @@ app.include_router(checks.router,    prefix="/api/checks",    tags=["Прове�
 app.include_router(searches.router,  prefix="/api/searches",  tags=["Поиск участка"])
 app.include_router(documents.router, prefix="/api/documents", tags=["Документы"])
 app.include_router(alice.router,     prefix="/api/alice",     tags=["Alice"])
+app.include_router(admin.router,     prefix="/api/admin",     tags=["Администрирование"])
 
 
 # ── System endpoints ──────────────────────────────────────────────────────────

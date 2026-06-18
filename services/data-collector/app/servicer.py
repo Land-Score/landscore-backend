@@ -18,6 +18,7 @@ from app.mock_data import build_plot_payload as mock_build_plot_payload
 from app.mock_data import stable_hash as mock_stable_hash
 from app.rosreestr_client import PlotData, egrn_to_dict, get_client, plot_to_dict
 from app.layers.normalizer import normalize_feature
+from app.sources.egrn_official import EGRNOfficialClient
 from app.sources.nspd_map_layers import NspdChildObjectClient, NspdMapLayerClient, parcel_geometry_from_plot_raw
 from app.spatial_collector import SpatialLayerCollector, collected_spatial_data_to_dict
 
@@ -52,6 +53,38 @@ def _egrn_response_dict(egrn) -> dict[str, Any]:
 def _set_unimplemented(context: Any, message: str = "Not implemented yet") -> None:
     context.set_code(grpc.StatusCode.UNIMPLEMENTED)
     context.set_details(message)
+
+
+def _format_encumbrance(item: Any) -> str:
+    """Render a structured encumbrance as a human-readable string.
+
+    EGRNResponse.encumbrances is ``repeated string`` in the proto, so structured
+    objects are flattened here; the full structured form is kept in raw_json.
+    """
+
+    if isinstance(item, str):
+        return item
+    if not isinstance(item, dict):
+        return str(item)
+    parts = [str(item.get("type") or "").strip()]
+    number = str(item.get("number") or "").strip()
+    if number:
+        parts.append(f"№ {number}")
+    date = str(item.get("date") or "").strip()
+    if date:
+        parts.append(f"от {date}")
+    text = " ".join(part for part in parts if part)
+    return text or "Обременение"
+
+
+def _first_registration_date(rights: list[Any], encumbrances: list[Any]) -> str:
+    for item in rights:
+        if isinstance(item, dict) and str(item.get("date") or "").strip():
+            return str(item["date"]).strip()
+    for item in encumbrances:
+        if isinstance(item, dict) and str(item.get("date") or "").strip():
+            return str(item["date"]).strip()
+    return ""
 
 
 def _polygon_coordinates_from_geometry(geometry: dict[str, Any] | None) -> list[Any]:
@@ -270,20 +303,102 @@ class DataCollectorServicer:
         self.dataset_pipeline = DataCollectionPipeline()
 
     async def GetPlotByCadastral(self, request, context):
-        plot = await get_client().get_plot(request.cadastral_number)
+        try:
+            plot = await get_client().get_plot(request.cadastral_number)
+        except LookupError as exc:
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            context.set_details(str(exc))
+            return _message_or_dict("PlotDataResponse", {})
+        except httpx.HTTPError as exc:
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details(f"NSPD public data request failed: {exc}")
+            return _message_or_dict("PlotDataResponse", {})
         return _message_or_dict("PlotDataResponse", _plot_response_dict(plot))
 
     async def GetPlotByAddress(self, request, context):
+        address = (request.address or "").strip()
         if settings.rosreestr_mode.lower() == "real":
-            _set_unimplemented(context, "Address lookup needs geocoder integration")
-            return _message_or_dict("PlotDataResponse", {})
+            client = get_client()
+            get_plot_by_address = getattr(client, "get_plot_by_address", None)
+            if get_plot_by_address is None:
+                # Fallback only if the active client cannot resolve addresses.
+                _set_unimplemented(context, "Address lookup is not supported by the active client")
+                return _message_or_dict("PlotDataResponse", {})
+            try:
+                plot = await get_plot_by_address(address)
+            except LookupError as exc:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details(str(exc))
+                return _message_or_dict("PlotDataResponse", {})
+            except httpx.HTTPError as exc:
+                context.set_code(grpc.StatusCode.UNAVAILABLE)
+                context.set_details(f"NSPD public data request failed: {exc}")
+                return _message_or_dict("PlotDataResponse", {})
+            return _message_or_dict("PlotDataResponse", _plot_response_dict(plot))
 
-        plot = _mock_plot_for_address(request.address)
+        plot = _mock_plot_for_address(address)
         return _message_or_dict("PlotDataResponse", _plot_response_dict(plot))
 
     async def GetEGRN(self, request, context):
-        egrn = await get_client().get_egrn(request.cadastral_number)
-        return _message_or_dict("EGRNResponse", _egrn_response_dict(egrn))
+        try:
+            egrn = await get_client().get_egrn(request.cadastral_number)
+        except LookupError as exc:
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            context.set_details(str(exc))
+            return _message_or_dict("EGRNResponse", {})
+        except httpx.HTTPError as exc:
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details(f"NSPD public data request failed: {exc}")
+            return _message_or_dict("EGRNResponse", {})
+
+        response = _egrn_response_dict(egrn)
+
+        # In real mode, enrich the honest "no official extract" stub with a paid
+        # ЕГРН Level-1 source when one is configured (EGRN_MODE != off).
+        if settings.rosreestr_mode.lower() == "real" and settings.egrn_mode.lower() not in ("off", ""):
+            response = await self._enrich_egrn_from_official(request.cadastral_number, response)
+
+        return _message_or_dict("EGRNResponse", response)
+
+    async def _enrich_egrn_from_official(self, cadastral_number: str, response: dict[str, Any]) -> dict[str, Any]:
+        try:
+            official = await EGRNOfficialClient().collect(cadastral_number=cadastral_number)
+        except Exception as exc:  # graceful: never break the response on a source error
+            raw = json.loads(response.get("raw_json") or "{}")
+            raw["egrn_official_error"] = str(exc)
+            response["raw_json"] = json.dumps(raw, ensure_ascii=False)
+            return response
+
+        encumbrances = official.get("encumbrances") or []
+        owner_name = official.get("owner_name")
+        owner_type = official.get("owner_type") or ""
+        rights = official.get("rights") or []
+
+        if encumbrances:
+            response["encumbrances"] = [_format_encumbrance(item) for item in encumbrances]
+        # Owner name is only present for ЮЛ; otherwise fall back to the type.
+        if owner_name:
+            response["owner"] = str(owner_name)
+        elif owner_type and not response.get("owner"):
+            response["owner"] = owner_type
+        registration_date = _first_registration_date(rights, encumbrances)
+        if registration_date and not response.get("registration_date"):
+            response["registration_date"] = registration_date
+
+        raw = json.loads(response.get("raw_json") or "{}")
+        raw["egrn_official"] = {
+            "source": official.get("source"),
+            "success": official.get("success"),
+            "rights": rights,
+            "encumbrances": encumbrances,
+            "owner_type": owner_type,
+            "owner_name": owner_name,
+            "warnings": official.get("warnings"),
+            "limitations": official.get("limitations"),
+            "diagnostics": official.get("diagnostics"),
+        }
+        response["raw_json"] = json.dumps(raw, ensure_ascii=False)
+        return response
 
     async def SearchPlots(self, request, context):
         if settings.rosreestr_mode.lower() == "real":

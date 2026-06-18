@@ -94,15 +94,33 @@ def _warnings(*values: Any) -> list[str]:
     return result
 
 
+def _address_parts(plot_data: dict[str, Any]) -> list[str]:
+    """Comma-separated tokens of the plot address, trimmed and non-empty."""
+
+    address = str(plot_data.get("address") or "")
+    return [part.strip() for part in address.split(",") if part.strip()]
+
+
+# Tokens that mark the administrative level of an address component.
+_REGION_MARKERS = ("область", "край", "респ", "автономн", "г. москва", "г.москва", "москва", "санкт-петербург")
+_DISTRICT_MARKERS = ("район", " р-н", "р-н ", "муницип", "городской округ", "г.о.")
+
+
 def _region_from_plot(plot_data: dict[str, Any]) -> str:
-    text = json.dumps(plot_data, ensure_ascii=False)
-    if "Ставрополь" in text:
-        return "Ставропольский край"
+    """Derive the region/subject from the plot address (any region)."""
+
+    for part in _address_parts(plot_data):
+        lowered = part.lower()
+        if any(marker in lowered for marker in _REGION_MARKERS):
+            return part
     return ""
 
 
 def _district_from_plot(plot_data: dict[str, Any]) -> str:
-    text = json.dumps(plot_data, ensure_ascii=False)
-    if "Шпаков" in text:
-        return "Шпаковский район"
+    """Derive the district/municipality from the plot address (any region)."""
+
+    for part in _address_parts(plot_data):
+        lowered = part.lower()
+        if any(marker in lowered for marker in _DISTRICT_MARKERS):
+            return part
     return ""

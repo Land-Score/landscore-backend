@@ -391,6 +391,35 @@ class RealRosreestrClient:
 
         return _plot_from_feature(features[0], raw=payload)
 
+    async def get_plot_by_address(self, address: str) -> PlotData:
+        address = (address or "").strip()
+        if not address:
+            raise LookupError("Address is empty")
+
+        query = quote(address, safe="")
+        async with await self._client() as client:
+            payload = await _first_successful_json(
+                client,
+                (
+                    f"/geoportal/v2/search/geoportal?thematicSearchId=1&query={query}&CRS=EPSG:3857",
+                    f"/geoportal/v2/search/geoportal?query={query}&CRS=EPSG:3857",
+                    f"/geoportal/v1/search/geoportal?thematicSearchId=1&query={query}&CRS=EPSG:3857",
+                    f"/geoportal/v2/search/geoportal?thematicSearchId=1&query={query}",
+                    f"/geoportal/v2/search/geoportal?query={query}",
+                    f"/geoportal/v1/search/geoportal?thematicSearchId=1&query={query}",
+                ),
+            )
+
+        features = _extract_features(payload)
+        feature = _first_land_plot_feature(features)
+        if feature is None:
+            raise LookupError(f"No public land plot found for address '{address}' in NSPD public data")
+
+        plot = _plot_from_feature(feature, raw=payload)
+        # Preserve the user's query alongside the resolved cadastral address.
+        plot.raw_json = {**(plot.raw_json or {}), "query_address": address}
+        return plot
+
     async def get_plot_by_coordinates(self, lat: float, lng: float, radius_m: float = 2.0) -> PlotData:
         body = {
             "geom": _point_buffer_feature_collection(lat, lng, radius_m),
@@ -424,6 +453,40 @@ class RealRosreestrClient:
                 ),
             },
         )
+
+
+def _feature_category_id(feature: dict[str, Any]) -> int | None:
+    properties = feature.get("properties") or {}
+    for key in ("category", "categoryId", "category_id"):
+        value = feature.get(key)
+        if value is None and isinstance(properties, dict):
+            value = properties.get(key)
+        try:
+            if value is not None:
+                return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _first_land_plot_feature(features: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Pick the first feature that is a land plot.
+
+    NSPD address search can return mixed object types (parcels, buildings,
+    boundaries). Prefer a feature in the land-plots category; otherwise fall
+    back to the first feature carrying a parseable cadastral number, then to
+    the first feature overall.
+    """
+
+    if not features:
+        return None
+    for feature in features:
+        if _feature_category_id(feature) == LAND_PLOTS_CATEGORY_ID:
+            return feature
+    for feature in features:
+        if _find_cadastral_number(_attrs_from_feature(feature)):
+            return feature
+    return features[0]
 
 
 def _extract_features(payload: dict[str, Any]) -> list[dict[str, Any]]:

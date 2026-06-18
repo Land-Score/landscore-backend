@@ -6,6 +6,8 @@ service SearchService {
   rpc CreateSearch(CreateSearchRequest) returns (SearchResponse);
   rpc GetSearch(SearchIdRequest) returns (SearchResponse);
   rpc ListSearches(ListSearchesRequest) returns (ListSearchesResponse);
+  rpc ListAllSearches(ListAllSearchesRequest) returns (ListSearchesResponse);
+  rpc CountSearches(CountSearchesRequest) returns (CountSearchesResponse);
   rpc GetSearchStatus(SearchIdRequest) returns (SearchStatusResponse);
   rpc GetSearchCriteria(SearchIdRequest) returns (SearchCriteriaResponse);
   rpc ConfirmCriteria(ConfirmCriteriaRequest) returns (google.protobuf.Empty);
@@ -34,6 +36,22 @@ message ListSearchesRequest {
 message ListSearchesResponse {
   repeated SearchResponse searches = 1;
   int32 total = 2;
+}
+
+message ListAllSearchesRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message CountSearchesRequest {}
+
+message CountSearchesResponse {
+  int32 total = 1;
+  int32 completed = 2;
+  int32 processing = 3;
+  int32 failed = 4;
+  int32 pending = 5;
+  int32 awaiting_confirmation = 6;
 }
 
 message SearchResponse {

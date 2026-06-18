@@ -135,6 +135,49 @@ class SearchServicer(search_pb2_grpc.SearchServiceServicer):
                 total=int(total or 0),
             )
 
+    async def ListAllSearches(self, request, context):
+        # Admin-wide listing across all users; no user_id filter applied.
+        limit = min(max(request.limit or 20, 1), 100)
+        offset = max(request.offset or 0, 0)
+        async with AsyncSessionLocal() as session:
+            total = await session.scalar(select(func.count()).select_from(LandSearch))
+            searches = list(
+                await session.scalars(
+                    select(LandSearch)
+                    .order_by(desc(LandSearch.created_at))
+                    .limit(limit)
+                    .offset(offset)
+                )
+            )
+            counts: dict[uuid.UUID, int] = {}
+            if searches:
+                rows = await session.execute(
+                    select(SearchCandidate.search_id, func.count())
+                    .where(SearchCandidate.search_id.in_([s.id for s in searches]))
+                    .group_by(SearchCandidate.search_id)
+                )
+                counts = {row[0]: int(row[1]) for row in rows}
+            return search_pb2.ListSearchesResponse(
+                searches=[_search_response(s, counts.get(s.id, 0)) for s in searches],
+                total=int(total or 0),
+            )
+
+    async def CountSearches(self, request, context):
+        # Aggregate search counts grouped by status for the admin dashboard.
+        async with AsyncSessionLocal() as session:
+            rows = await session.execute(
+                select(LandSearch.status, func.count()).group_by(LandSearch.status)
+            )
+            by_status = {status: int(count) for status, count in rows}
+            return search_pb2.CountSearchesResponse(
+                total=sum(by_status.values()),
+                completed=by_status.get(SearchStatus.COMPLETED, 0),
+                processing=by_status.get(SearchStatus.PROCESSING, 0),
+                failed=by_status.get(SearchStatus.FAILED, 0),
+                pending=by_status.get(SearchStatus.PENDING, 0),
+                awaiting_confirmation=by_status.get(SearchStatus.AWAITING_CONFIRMATION, 0),
+            )
+
     async def GetSearchStatus(self, request, context):
         search_id = await _parse_uuid(request.search_id, "search_id", context)
         async with AsyncSessionLocal() as session:

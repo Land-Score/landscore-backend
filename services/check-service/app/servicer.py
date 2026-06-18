@@ -5,7 +5,7 @@ from typing import Any
 
 import grpc
 from google.protobuf.empty_pb2 import Empty
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import check_pb2
@@ -195,6 +195,19 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
                 await context.abort(grpc.StatusCode.NOT_FOUND, "check not found")
             return _check_response(check)
 
+    async def DeleteCheck(self, request, context):
+        check_id = await _parse_uuid(request.check_id, "check_id", context)
+        async with AsyncSessionLocal() as session:
+            check = await session.get(LandCheck, check_id)
+            if check is None:
+                await context.abort(grpc.StatusCode.NOT_FOUND, "check not found")
+            # Remove dependent rows first (no DB-level cascade is guaranteed).
+            await session.execute(delete(CheckResult).where(CheckResult.check_id == check_id))
+            await session.execute(delete(CheckStep).where(CheckStep.check_id == check_id))
+            await session.delete(check)
+            await session.commit()
+            return check_pb2.DeleteCheckResponse(success=True)
+
     async def ListChecks(self, request, context):
         user_id = await _parse_uuid(request.user_id, "user_id", context)
         limit = min(max(request.limit or 20, 1), 100)
@@ -213,6 +226,40 @@ class CheckServicer(check_pb2_grpc.CheckServiceServicer):
             return check_pb2.ListChecksResponse(
                 checks=[_check_response(row) for row in rows],
                 total=int(total or 0),
+            )
+
+    async def ListAllChecks(self, request, context):
+        # Admin-wide listing across all users. Unlike ListChecks there is no
+        # user_id filter; an optional status narrows the result set.
+        limit = min(max(request.limit or 20, 1), 100)
+        offset = max(request.offset or 0, 0)
+        status = (request.status or "").strip()
+        async with AsyncSessionLocal() as session:
+            count_stmt = select(func.count()).select_from(LandCheck)
+            list_stmt = select(LandCheck).order_by(desc(LandCheck.created_at)).limit(limit).offset(offset)
+            if status:
+                count_stmt = count_stmt.where(LandCheck.status == status)
+                list_stmt = list_stmt.where(LandCheck.status == status)
+            total = await session.scalar(count_stmt)
+            rows = await session.scalars(list_stmt)
+            return check_pb2.ListChecksResponse(
+                checks=[_check_response(row) for row in rows],
+                total=int(total or 0),
+            )
+
+    async def CountChecks(self, request, context):
+        # Aggregate check counts grouped by status for the admin dashboard.
+        async with AsyncSessionLocal() as session:
+            rows = await session.execute(
+                select(LandCheck.status, func.count()).group_by(LandCheck.status)
+            )
+            by_status = {status: int(count) for status, count in rows}
+            return check_pb2.CountChecksResponse(
+                total=sum(by_status.values()),
+                completed=by_status.get(CheckStatus.COMPLETED, 0),
+                processing=by_status.get(CheckStatus.PROCESSING, 0),
+                failed=by_status.get(CheckStatus.FAILED, 0),
+                pending=by_status.get(CheckStatus.PENDING, 0),
             )
 
     async def GetCheckStatus(self, request, context):

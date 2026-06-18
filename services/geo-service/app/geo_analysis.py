@@ -134,6 +134,19 @@ def analyze_location(lat: float, lng: float, cadastral_number: str = "") -> dict
         locality = f"Сельская местность (≈{round(city_km)} км от г. {city.name})"
 
     raw = {
+        # Эти значения — эвристика на основе встроенного справочника (близость
+        # к городам / рекам / ЛЭП), а не данные ЕГРН или сетевых организаций.
+        # Маркеры ниже сообщают потребителям, что наличие сетей и расстояния до
+        # них носят оценочный характер и требуют подтверждения у ресурсоснабжающих
+        # организаций.
+        "synthetic": True,
+        "method": "reference_heuristic",
+        "note": (
+            "Наличие инженерных сетей (электричество, газ, вода) и связанные "
+            "расстояния — эвристическая оценка по близости к справочным объектам, "
+            "а не подтверждённые факты. Требуется проверка у ресурсоснабжающих "
+            "организаций и в ЕГРН."
+        ),
         "input": {"lat": lat, "lng": lng, "cadastral_number": cadastral_number},
         "nearest_city": {"name": city.name, "distance_km": round(city_km, 2), "population": city.population},
         "nearest_road": {"name": road.name if road else None, "distance_km": round(road_km, 2)},
@@ -145,6 +158,9 @@ def analyze_location(lat: float, lng: float, cadastral_number: str = "") -> dict
             "gas": has_gas,
             "water": has_water,
             "available_count": utilities_count,
+            # Логическое наличие сетей выведено эвристически из расстояний выше.
+            "synthetic": True,
+            "method": "reference_heuristic",
         },
         "protected_zones": [
             {"name": z.name, "zone_type": z.zone_type, "restrictions": z.restrictions}
@@ -177,10 +193,13 @@ def analyze_location(lat: float, lng: float, cadastral_number: str = "") -> dict
 
 
 def compute_distances(lat: float, lng: float, poi_types: list[str]) -> dict[str, float]:
-    """Distance (km) to each requested POI type from the reference dataset.
+    """Distance (km) to each requested POI type backed by the reference dataset.
 
-    Unknown POI types are mapped to a deterministic, plausible derived value so
-    callers never crash on unexpected inputs.
+    Only POI types for which we have a genuine reference source are returned.
+    Surface water bodies (``water``) are answered from the rivers dataset.
+    POI types without any reference source (e.g. ``gas_pipe``) are **omitted**
+    from the result map — they are never fabricated. Callers must treat a
+    missing key as "unknown", not as zero distance.
     """
 
     line_sources: dict[str, list[PolyLine]] = {
@@ -189,7 +208,8 @@ def compute_distances(lat: float, lng: float, poi_types: list[str]) -> dict[str,
         "river": RIVERS,
         "power_line": POWER_LINES,
     }
-    # Common Russian aliases mapped to canonical types.
+    # Common aliases (Russian + EN) mapped to canonical types we can answer.
+    # ``water`` is treated as the nearest surface water body (river).
     aliases = {
         "highway": "road",
         "дорога": "road",
@@ -197,7 +217,12 @@ def compute_distances(lat: float, lng: float, poi_types: list[str]) -> dict[str,
         "ж/д": "railway",
         "железная_дорога": "railway",
         "река": "river",
+        "water": "river",
+        "вода": "river",
+        "водоем": "river",
         "лэп": "power_line",
+        "powerline": "power_line",
+        "электросети": "power_line",
         "город": "city",
         "населенный_пункт": "city",
     }
@@ -211,11 +236,9 @@ def compute_distances(lat: float, lng: float, poi_types: list[str]) -> dict[str,
         elif canonical in line_sources:
             _, dist = nearest_line_km(lat, lng, line_sources[canonical])
         else:
-            # Unknown POI: derive a stable pseudo-distance from the coordinates
-            # and the requested type so the response is deterministic.
-            seed = f"{canonical}|{round(lat, 4)}|{round(lng, 4)}"
-            digest = int(hashlib.sha256(seed.encode("utf-8")).hexdigest(), 16)
-            dist = round(2.0 + (digest % 4800) / 100.0, 2)  # 2.0 .. 50.0 km
+            # No reference source for this POI type (e.g. gas pipelines): omit
+            # it rather than fabricate a value. Downstream sees a missing key.
+            continue
         result[raw_type] = round(dist, 2)
     return result
 

@@ -4,13 +4,20 @@ import grpc
 import sys
 from concurrent import futures
 
+PROTO_GEN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "proto_gen"))
+if PROTO_GEN_DIR not in sys.path:
+    sys.path.insert(0, PROTO_GEN_DIR)
+
 try:
-    PROTO_GEN_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "proto_gen"))
-    if PROTO_GEN_DIR not in sys.path:
-        sys.path.insert(0, PROTO_GEN_DIR)
     import geo_pb2_grpc
-except ImportError:
-    geo_pb2_grpc = None
+except ImportError as exc:  # Сгенерированные stubs обязательны для запуска сервера.
+    print(
+        "geo-service fatal: не найдены сгенерированные gRPC stubs (geo_pb2_grpc). "
+        f"Ожидаются в {PROTO_GEN_DIR}. Сгенерируйте их через `make proto` перед запуском. "
+        f"Причина: {exc}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 from app.servicer import GeoServicer
 
@@ -26,10 +33,7 @@ async def serve() -> None:
         futures.ThreadPoolExecutor(max_workers=10),
         options=GRPC_MESSAGE_OPTIONS,
     )
-    if geo_pb2_grpc is not None:
-        geo_pb2_grpc.add_GeoServiceServicer_to_server(GeoServicer(), server)
-    else:
-        print("geo-service warning: generated proto stubs not found; service starts without registered RPC handlers")
+    geo_pb2_grpc.add_GeoServiceServicer_to_server(GeoServicer(), server)
     server.add_insecure_port("0.0.0.0:50057")
     print("geo-service listening on :50057")
     await server.start()

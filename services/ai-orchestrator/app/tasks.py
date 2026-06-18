@@ -57,6 +57,20 @@ def _json_loads(data: str) -> Any:
         return {"raw": data}
 
 
+def _safe_score(value: Any) -> int:
+    """Coerce an LLM-provided overall_score to a clamped 0..100 int.
+
+    The structured-output fallback path can return non-numeric strings
+    ('78%', 'высокий', 'N/A'); int() on those would crash _save_check_result
+    AFTER the whole pipeline already ran. Degrade to 0 instead of losing the run.
+    """
+    try:
+        n = int(float(str(value).strip().rstrip("%") or 0))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(100, n))
+
+
 def _as_text(value: Any) -> str:
     if value is None:
         return ""
@@ -76,16 +90,48 @@ def _fit_db_text(value: Any, limit: int) -> str:
     return text[: max(0, limit - 3)].rstrip() + "..."
 
 
+def _step_to_text(item: dict) -> str:
+    """Render a NextSteps-style step dict as a single human-readable Russian string.
+
+    Joins the title and action (the two meaningful text fields) instead of
+    repr(dict), which previously leaked "{'title': ...}" into next_steps.
+    """
+    title = str(item.get("title") or "").strip()
+    action = str(item.get("action") or "").strip()
+    if title and action and action != title:
+        return f"{title}: {action}"
+    text = title or action
+    if text:
+        return text
+    # Fall back to any single text-like field before giving up on the dict.
+    for key in ("text", "description", "reason", "summary", "name"):
+        candidate = str(item.get(key) or "").strip()
+        if candidate:
+            return candidate
+    return ""
+
+
 def _as_list(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, list):
-        return [str(item) for item in value]
+        items: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                text = _step_to_text(item)
+            else:
+                text = str(item).strip()
+            if text:
+                items.append(text)
+        return items
     if isinstance(value, dict):
-        for key in ("text", "explanation", "summary", "message"):
+        # Prefer the structured list payloads (e.g. NextStepsAgent {steps:[...]})
+        # over the single summary/text fields so the array keeps per-item entries
+        # instead of collapsing into one summary line.
+        for key in ("next_steps", "steps", "stop_factors", "items"):
             if key in value:
                 return _as_list(value[key])
-        for key in ("next_steps", "steps", "stop_factors", "items"):
+        for key in ("text", "explanation", "summary", "message"):
             if key in value:
                 return _as_list(value[key])
     if isinstance(value, str):
@@ -165,7 +211,7 @@ async def _save_check_result(check_id: str, ctx: AgentContext, results: dict[str
         check_pb2.SaveResultRequest(
             check_id=check_id,
             plot_id=ctx.plot.cadastral_number or "",
-            overall_score=int(decision.get("overall_score") or 0),
+            overall_score=_safe_score(decision.get("overall_score")),
             legal_risk=_fit_db_text(decision.get("legal_risk"), 20),
             stop_factors=_as_list(critical.get("stop_factors")),
             best_scenario=_fit_db_text(decision.get("best_scenario"), 50),

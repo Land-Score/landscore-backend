@@ -33,13 +33,17 @@ def build_check_pipeline() -> list[Agent | ParallelGroup]:
         DataRequestAgent(),
         SearchPlanningAgent(),
         DocumentExtractionAgent(),
+        # GeoAgent runs BEFORE FactNormalization so geo_analysis (geometry/restricted/
+        # usable area, loss_percent) actually populates the normalized passport and
+        # flows into scenario sizing. Previously it sat in the parallel group AFTER
+        # FactNormalization, so those areas were always 0.
+        GeoAgent(),
         FactNormalizationAgent(),
         ParallelGroup([
             LegalAgent(),
             LandUseAgent(),
             RestrictionsAgent(),
             InfrastructureAgent(),
-            GeoAgent(),
             MarketAgent(),
         ]),
         CriticalRiskAgent(),

@@ -71,8 +71,9 @@ class FactNormalizationAgent(Agent):
         usable_area_ha = _to_float(geo_analysis.get("usable_area_ha"))
         loss_percent = _to_float(geo_analysis.get("loss_percent"))
 
-        # Если geo-анализа нет — полезная площадь = кадастровая (в м²).
-        cadastral_area_ha = cadastral_area / 10_000.0 if cadastral_area > 1000 else cadastral_area
+        # Кадастровая площадь из НСПД всегда в м² → переводим в га безусловно
+        # (старый порог > 1000 ломал участки ≤1000 м²: 945 м² трактовались как 945 га).
+        cadastral_area_ha = cadastral_area / 10_000.0 if cadastral_area else 0.0
         if not usable_area_ha and cadastral_area_ha:
             usable_area_ha = cadastral_area_ha
 

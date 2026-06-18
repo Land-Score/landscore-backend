@@ -30,7 +30,9 @@ def _area_ha_from_sqm(value: Any) -> float | None:
     area = _round(value)
     if area is None:
         return None
-    return round(area / 10_000, 4) if area > 1_000 else area
+    # NSPD/EGRN area is always m²; convert to ha unconditionally (a 945 m² plot must
+    # become 0.0945 ha, not stay 945). The old `> 1000` guard broke parcels ≤1000 m².
+    return round(area / 10_000, 4) if area else 0.0
 
 
 def _soil_summary(soil_payload: dict[str, Any]) -> dict[str, Any]:

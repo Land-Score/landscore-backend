@@ -45,8 +45,23 @@ class BaseLLMAgent(Agent):
                 temperature=self.temperature,
             )
 
+            # complete() attaches token usage as a side-channel: "_tokens" on the
+            # structured branch, "tokens" on the free-text branch. Extract and strip
+            # "_tokens" so it never leaks into the parsed schema seen by downstream agents.
+            tokens_used = 0
+            if isinstance(result, dict):
+                if "_tokens" in result:
+                    tokens_used = result.pop("_tokens") or 0
+                elif "tokens" in result:
+                    tokens_used = result.get("tokens") or 0
+
             elapsed = int((time.monotonic() - start) * 1000)
-            return AgentResult(success=True, data=result, duration_ms=elapsed)
+            return AgentResult(
+                success=True,
+                data=result,
+                tokens_used=tokens_used,
+                duration_ms=elapsed,
+            )
 
         except Exception as e:
             elapsed = int((time.monotonic() - start) * 1000)

@@ -154,7 +154,10 @@ class GeoAgent(Agent):
                 cadastral_number=ctx.plot.cadastral_number,
                 scenario=scenario,
                 parcel_geometry_geojson=parcel_geometry_geojson,
-                parcel_area_ha=(ctx.plot.area / 10_000.0 if ctx.plot.area > 1000 else ctx.plot.area),
+                # NSPD/EGRN area is always in m²; convert to hectares unconditionally.
+                # (The old `> 1000` heuristic mistreated parcels ≤1000 m² as if already in ha,
+                #  e.g. a 945 m² plot became 945 ha → loss_percent ~0 instead of the real ~99%.)
+                parcel_area_ha=(ctx.plot.area / 10_000.0 if ctx.plot.area else 0.0),
                 restriction_layers=[
                     _to_geo_restriction_layer(layer)
                     for layer in spatial_layers.get("restriction_layers", [])

@@ -12,6 +12,7 @@ from app.config import settings
 
 
 _client: AsyncOpenAI | None = None
+_client_loop_id: int | None = None
 
 
 def _normalize_base_url(value: str) -> str:
@@ -32,8 +33,17 @@ def _normalize_model(value: str) -> str:
 
 
 def get_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
+    global _client, _client_loop_id
+    # Each Celery task runs its own asyncio.run() loop. The underlying httpx client
+    # binds to the loop it was created on, so a module-global cached across tasks
+    # raises "Event loop is closed" on the 2nd+ task. Recreate when the loop changes.
+    import asyncio
+    try:
+        loop_id = id(asyncio.get_running_loop())
+    except RuntimeError:
+        loop_id = None
+    if _client is None or loop_id != _client_loop_id:
+        _client_loop_id = loop_id
         _client = AsyncOpenAI(
             api_key=settings.yandex_ai_api_key,
             base_url=_normalize_base_url(settings.yandex_ai_base_url),
@@ -114,7 +124,12 @@ async def complete(
         response = await _create_completion(fallback_kwargs)
 
     content = response.choices[0].message.content or ""
+    tokens = response.usage.total_tokens if response.usage else 0
 
     if response_schema:
-        return _parse_json_object(content)
-    return {"text": content, "tokens": response.usage.total_tokens if response.usage else 0}
+        parsed = _parse_json_object(content)
+        # Side-channel: expose token usage without polluting the parsed schema.
+        # base_llm.run extracts and strips this key before passing data downstream.
+        parsed["_tokens"] = tokens
+        return parsed
+    return {"text": content, "tokens": tokens}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from typing import Any
@@ -42,7 +43,8 @@ class DocumentServicer:
             context.set_details("data is required")
             return _message_or_dict("StoreDocumentResponse", {})
         try:
-            meta = store.store_document(
+            meta = await asyncio.to_thread(
+                store.store_document,
                 user_id=request.user_id,
                 filename=request.filename,
                 content_type=request.content_type,
@@ -70,7 +72,7 @@ class DocumentServicer:
     async def ExtractText(self, request, context):
         document_id = request.document_id
         try:
-            data = store.get_document_bytes(document_id)
+            data = await asyncio.to_thread(store.get_document_bytes, document_id)
         except S3Error:
             _not_found(context, document_id)
             return _message_or_dict("ExtractTextResponse", {"document_id": document_id})
@@ -82,13 +84,15 @@ class DocumentServicer:
         content_type = ""
         filename = ""
         try:
-            meta = store.get_document_meta(document_id)
+            meta = await asyncio.to_thread(store.get_document_meta, document_id)
             content_type = meta.content_type
             filename = meta.filename
         except Exception:
             pass  # Metadata sidecar optional; extraction sniffs the bytes anyway.
 
-        result = extract_text(data=data, content_type=content_type, filename=filename)
+        result = await asyncio.to_thread(
+            extract_text, data=data, content_type=content_type, filename=filename
+        )
         return _message_or_dict(
             "ExtractTextResponse",
             {
@@ -102,12 +106,12 @@ class DocumentServicer:
 
     async def GetDocument(self, request, context):
         document_id = request.document_id
-        if not store.document_exists(document_id):
+        if not await asyncio.to_thread(store.document_exists, document_id):
             _not_found(context, document_id)
             return _message_or_dict("GetDocumentResponse", {"document_id": document_id})
         try:
-            meta = store.get_document_meta(document_id)
-            download_url = store.presigned_document_url(document_id)
+            meta = await asyncio.to_thread(store.get_document_meta, document_id)
+            download_url = await asyncio.to_thread(store.presigned_document_url, document_id)
         except S3Error as exc:
             context.set_code(grpc.StatusCode.UNAVAILABLE)
             context.set_details(f"object storage error: {exc}")
@@ -131,17 +135,28 @@ class DocumentServicer:
         )
 
     async def DeleteDocument(self, request, context):
+        document_id = request.document_id
         try:
-            success = store.delete_document(request.document_id)
+            deleted = await asyncio.to_thread(store.delete_document, document_id)
+        except S3Error as exc:
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details(f"object storage error: {exc}")
+            return _message_or_dict("DeleteDocumentResponse", {"success": False})
         except Exception as exc:
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(exc))
             return _message_or_dict("DeleteDocumentResponse", {"success": False})
-        return _message_or_dict("DeleteDocumentResponse", {"success": success})
+
+        if not deleted:
+            # Nothing was removed because the document does not exist.
+            _not_found(context, document_id)
+            return _message_or_dict("DeleteDocumentResponse", {"success": False})
+        return _message_or_dict("DeleteDocumentResponse", {"success": True})
 
     async def GenerateReport(self, request, context):
         try:
-            result = generate_report(
+            result = await asyncio.to_thread(
+                generate_report,
                 check_id=request.check_id,
                 report_json=request.report_json,
                 fmt=request.format,

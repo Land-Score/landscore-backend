@@ -65,8 +65,13 @@ def _ocr_image_bytes(data: bytes) -> str:
     return (pytesseract.image_to_string(image, lang=settings.ocr_lang) or "").strip()
 
 
-def _ocr_pdf(data: bytes) -> tuple[str, str]:
-    """OCR a (scanned) PDF by rasterizing pages. Returns (text, method/note)."""
+def _ocr_pdf(data: bytes, *, page_count: int = 0) -> tuple[str, str]:
+    """OCR a (scanned) PDF by rasterizing pages. Returns (text, method/note).
+
+    Rasterizes one page at a time at a capped DPI and never more than
+    ``settings.ocr_pdf_max_pages`` pages, so a large scan cannot exhaust
+    memory: at most one page image is held at once.
+    """
     # pypdf cannot rasterize; we rely on pdf2image if available, otherwise note
     # the limitation. pdf2image is optional and may be absent.
     try:
@@ -74,20 +79,43 @@ def _ocr_pdf(data: bytes) -> tuple[str, str]:
     except Exception:
         return "", "ocr_unavailable: pdf rasterizer (pdf2image/poppler) not installed"
 
-    try:
-        images = convert_from_bytes(data)
-    except Exception as exc:
-        return "", f"ocr_unavailable: pdf rasterization failed ({exc})"
-
     import pytesseract
 
+    dpi = settings.ocr_pdf_dpi
+    max_pages = settings.ocr_pdf_max_pages
+    # Cap the number of pages we OCR. page_count comes from pypdf; if it is
+    # unknown (0) we still cap by max_pages.
+    last_page = min(page_count, max_pages) if page_count else max_pages
+    truncated = bool(page_count and page_count > max_pages)
+
     chunks: list[str] = []
-    for image in images:
+    for page_no in range(1, last_page + 1):
+        try:
+            images = convert_from_bytes(
+                data, dpi=dpi, first_page=page_no, last_page=page_no
+            )
+        except Exception as exc:
+            if not chunks:
+                return "", f"ocr_unavailable: pdf rasterization failed ({exc})"
+            return "\n".join(chunks).strip(), f"ocr_partial: {exc}"
+
+        if not images:
+            break  # past the last real page.
+        image = images[0]
         try:
             chunks.append((pytesseract.image_to_string(image, lang=settings.ocr_lang) or "").strip())
         except Exception as exc:
             return "\n".join(chunks).strip(), f"ocr_partial: {exc}"
-    return "\n".join(chunks).strip(), "ocr_pytesseract"
+        finally:
+            try:
+                image.close()
+            except Exception:
+                pass
+
+    note = "ocr_pytesseract"
+    if truncated:
+        note = f"ocr_pytesseract (truncated to {max_pages} of {page_count} pages)"
+    return "\n".join(chunks).strip(), note
 
 
 def extract_text(*, data: bytes, content_type: str = "", filename: str = "") -> ExtractionResult:
@@ -116,7 +144,7 @@ def extract_text(*, data: bytes, content_type: str = "", filename: str = "") -> 
             )
 
         # Scanned / image-only PDF -> attempt OCR fallback.
-        ocr_text, note = _ocr_pdf(data)
+        ocr_text, note = _ocr_pdf(data, page_count=page_count)
         text = ocr_text or embedded_text
         return ExtractionResult(
             extracted_text=text,

@@ -30,12 +30,31 @@ def _message_or_dict(message_name: str, data: dict[str, Any]):
     return getattr(market_pb2, message_name)(**data)
 
 
+def _safe_float(value: Any) -> float:
+    """Coerce to float, mapping None / NaN / inf to 0.0 so they never propagate
+    into round()/division and crash-loop the RPC."""
+    try:
+        result = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if result != result or result in (float("inf"), float("-inf")):
+        return 0.0
+    return result
+
+
 def _price_assessment(asking_ppsqm: float, median_ppsqm: float) -> tuple[str, float]:
     """Return (assessment, deviation_pct) of asking vs. market median ppsqm.
 
     deviation_pct > 0  => asking is above market.
+
+    NOTE: only call this with a TRUE seller asking price. Cadastral value
+    (государственная кадастровая стоимость) is structurally below market and
+    must NOT be labelled "ниже рынка" — use NEUTRAL_CADASTRAL_ASSESSMENT instead.
     """
 
+    # NaN/inf guard: a malformed input must never propagate into round()/labels.
+    if asking_ppsqm != asking_ppsqm or median_ppsqm != median_ppsqm:
+        return "недостаточно данных", 0.0
     if median_ppsqm <= 0 or asking_ppsqm <= 0:
         return "недостаточно данных", 0.0
     deviation = (asking_ppsqm - median_ppsqm) / median_ppsqm * 100.0
@@ -45,6 +64,15 @@ def _price_assessment(asking_ppsqm: float, median_ppsqm: float) -> tuple[str, fl
     if deviation >= 10.0:
         return "выше рынка", deviation
     return "в рынке", deviation
+
+
+# The incoming MarketRequest.asking_price is the cadastral value, not a real
+# seller asking price. Comparing it against the market median would falsely flag
+# the plot as "ниже рынка" because cadastral is structurally below market. Until
+# a separate true-asking-price field exists in the proto, treat the value as a
+# cadastral reference and report this neutral assessment.
+NEUTRAL_CADASTRAL_ASSESSMENT = "оценка по кадастровой стоимости"
+NO_COMPS_ASSESSMENT = "нет рыночных аналогов"
 
 
 def _market_activity(total_count: int, recent_count: int) -> str:
@@ -117,12 +145,15 @@ class MarketServicer:
         region = request.region or ""
         category = request.category or ""
         allowed_use = request.allowed_use or ""
-        area = float(request.area or 0.0)
-        asking_price = float(request.asking_price or 0.0)
+        area = _safe_float(request.area)
+        # NB: asking_price carries the cadastral value (государственная кадастровая
+        # стоимость), NOT a real seller asking price. See module-level notes.
+        cadastral_value = _safe_float(request.asking_price)
 
         # Cadastral ₽/m² — the real, official anchor (государственная кадастровая
-        # стоимость from НСПД, passed in as asking_price). Always our base signal.
-        cadastral_ppsqm = (asking_price / area) if (asking_price > 0 and area > 0) else 0.0
+        # стоимость from НСПД). Always our base signal, but it is structurally
+        # BELOW market and must never be compared against the market median.
+        cadastral_ppsqm = (cadastral_value / area) if (cadastral_value > 0 and area > 0) else 0.0
 
         # 1) Real live comparables from torgi.gov.ru (best-effort; sparse for land).
         try:
@@ -138,32 +169,65 @@ class MarketServicer:
             avg_ppsqm = round(sum(ppsqm_values) / len(ppsqm_values), 2)
             count = len(ppsqm_values)
             source = "torgi.gov.ru (госимущество)"
-            assessment, deviation = _price_assessment(cadastral_ppsqm, median_ppsqm)
+            # We DO have a market median, but the price we hold is the cadastral
+            # value, not a real seller asking price. Comparing cadastral against
+            # the market median would falsely flag the plot as "ниже рынка"
+            # (cadastral is structurally below market). So we report a neutral
+            # cadastral assessment and surface the cadastral ₽/м² for reference
+            # only — we do NOT call _price_assessment on the cadastral value.
+            deviation = 0.0
             activity = _market_activity(count, count)
             trend = "стабильно"
-            commentary = (
-                f"Рыночный ориентир рассчитан по {count} реальным лотам torgi.gov.ru "
-                f"(медиана {median_ppsqm:,.0f} ₽/м²). Кадастровая стоимость — "
-                f"{cadastral_ppsqm:,.0f} ₽/м². {_commentary(assessment, deviation, count, activity, trend)}"
-            ).replace(",", " ")
-        else:
-            # No live comparables -> present the real cadastral valuation as the reference.
-            median_ppsqm = round(cadastral_ppsqm, 2)
-            avg_ppsqm = round(cadastral_ppsqm, 2)
-            count = len(ppsqm_values)
-            source = "Государственная кадастровая стоимость (НСПД)"
-            assessment = "оценка по кадастровой стоимости" if cadastral_ppsqm > 0 else "недостаточно данных"
-            deviation = 0.0
-            activity = "нет данных" if not comps else "низкая"
-            trend = "стабильно"
             if cadastral_ppsqm > 0:
+                ratio_note = ""
+                # Informational ratio, not a "below/above market" verdict.
+                gap_pct = round((median_ppsqm - cadastral_ppsqm) / median_ppsqm * 100.0, 0) if median_ppsqm > 0 else 0.0
+                if gap_pct > 0:
+                    ratio_note = (
+                        f" Кадастровая стоимость примерно на {gap_pct:.0f}% ниже рыночной медианы, "
+                        f"что типично и не является признаком выгодной цены."
+                    )
+                assessment = NEUTRAL_CADASTRAL_ASSESSMENT
                 commentary = (
-                    f"Рыночная стоимость оценена по государственной кадастровой стоимости: "
-                    f"{cadastral_ppsqm:,.0f} ₽/м² ({cadastral_ppsqm * 100:,.0f} ₽/сотка). "
-                    f"Активные рыночные аналоги по региону в открытых источниках (torgi.gov.ru) не найдены."
+                    f"Рыночный ориентир рассчитан по {count} реальным лотам torgi.gov.ru "
+                    f"(медиана {median_ppsqm:,.0f} ₽/м²). Кадастровая стоимость — "
+                    f"{cadastral_ppsqm:,.0f} ₽/м².{ratio_note} "
+                    f"Реальная цена продавца не передана, оценка отклонения от рынка не выполнялась."
                 ).replace(",", " ")
             else:
-                commentary = "Недостаточно данных: не задана кадастровая стоимость и не найдены рыночные аналоги."
+                assessment = NEUTRAL_CADASTRAL_ASSESSMENT
+                commentary = (
+                    f"Рыночный ориентир рассчитан по {count} реальным лотам torgi.gov.ru "
+                    f"(медиана {median_ppsqm:,.0f} ₽/м²). Кадастровая стоимость не передана."
+                ).replace(",", " ")
+        else:
+            # No live comparables. We must NOT equate the market median to the
+            # cadastral value: doing so makes downstream resale ROI compute
+            # profit = market_value - price - costs = -costs (price == market_value),
+            # a phantom always-negative ROI. Report zero market median / zero
+            # comparables and surface the cadastral ₽/м² only as a reference in
+            # the commentary.
+            median_ppsqm = 0.0
+            avg_ppsqm = 0.0
+            count = 0
+            deviation = 0.0
+            activity = "нет данных"
+            trend = "стабильно"
+            if cadastral_ppsqm > 0:
+                source = "Государственная кадастровая стоимость (НСПД)"
+                assessment = NEUTRAL_CADASTRAL_ASSESSMENT
+                commentary = (
+                    f"Рыночные аналоги по региону в открытых источниках (torgi.gov.ru) не найдены — "
+                    f"рыночная медиана не рассчитывалась. Для справки кадастровая стоимость составляет "
+                    f"{cadastral_ppsqm:,.0f} ₽/м² ({cadastral_ppsqm * 100:,.0f} ₽/сотка); это официальный "
+                    f"ориентир, который структурно ниже рынка и не равен рыночной цене."
+                ).replace(",", " ")
+            else:
+                source = "нет данных"
+                assessment = NO_COMPS_ASSESSMENT
+                commentary = (
+                    "Недостаточно данных: рыночные аналоги не найдены и кадастровая стоимость не передана."
+                )
 
         return _message_or_dict(
             "MarketAnalysis",
@@ -182,13 +246,19 @@ class MarketServicer:
     async def GetComparables(self, request, context):
         region = request.region or ""
         category = request.category or ""
-        area_min = float(request.area_min or 0.0)
-        area_max = float(request.area_max or 0.0)
-        limit = int(request.limit or 0) or 20
+        # ComparablesRequest has no allowed_use field today; read it defensively
+        # so we stay consistent with GetMarketAnalysis (which always forwards it)
+        # and pick it up automatically if the proto later gains the field.
+        allowed_use = getattr(request, "allowed_use", "") or ""
+        area_min = _safe_float(request.area_min)
+        area_max = _safe_float(request.area_max)
+        limit = int(_safe_float(request.limit)) or 20
 
         # Prefer real live comparables from torgi.gov.ru.
         try:
-            live = await asyncio.to_thread(fetch_land_comparables, region=region, category=category)
+            live = await asyncio.to_thread(
+                fetch_land_comparables, region=region, category=category, allowed_use=allowed_use
+            )
         except Exception:  # noqa: BLE001
             live = []
         rows = [

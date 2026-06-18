@@ -18,9 +18,11 @@ if BaseSettings is not None:
         nspd_resolve_ip: str = ""
         nspd_force_ipv4: bool = True
         rosreestr_user_agent: str = "LandScoreAI/0.1 (+https://landscore.local)"
-        egrn_mode: str = "off"
+        egrn_mode: str = "off"  # off | mock | newdb | parser | auto
         egrn_api_url: str = ""
         egrn_api_key: str = ""
+        egrn_parser_url: str = "https://parser-api.com/parser/egrn_api/details_by_number"
+        egrn_parser_key: str = ""
         egrn_timeout: float = 30.0
         source_timeout: float = 12.0
         market_search_enabled: bool = False
@@ -48,6 +50,8 @@ else:
         egrn_mode: str = os.getenv("EGRN_MODE", "off")
         egrn_api_url: str = os.getenv("EGRN_API_URL", "")
         egrn_api_key: str = os.getenv("EGRN_API_KEY", "")
+        egrn_parser_url: str = os.getenv("EGRN_PARSER_URL", "https://parser-api.com/parser/egrn_api/details_by_number")
+        egrn_parser_key: str = os.getenv("EGRN_PARSER_KEY", "")
         egrn_timeout: float = float(os.getenv("EGRN_TIMEOUT", "30"))
         source_timeout: float = float(os.getenv("SOURCE_TIMEOUT", "12"))
         market_search_enabled: bool = os.getenv("MARKET_SEARCH_ENABLED", "false").lower() in {"1", "true", "yes"}

@@ -9,6 +9,7 @@ from app.models import (
     SearchResultsResponse, CandidateResponse,
     RecommendationResponse, ListSearchesResponse,
 )
+from app.ratelimit import WRITE_LIMIT, limiter
 
 router = APIRouter()
 
@@ -34,7 +35,9 @@ def _search_item(r) -> SearchItemResponse:
         "После создания опрашивайте `/status` до `status=awaiting_confirmation`, "
         "затем покажите критерии пользователю на экране `/criteria`."
     ),
+    responses={429: {"description": "Превышен лимит запросов"}},
 )
+@limiter.limit(WRITE_LIMIT)
 async def create_search(body: CreateSearchRequest, request: Request) -> SearchItemResponse:
     import search_pb2
     import auth_pb2

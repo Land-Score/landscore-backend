@@ -18,6 +18,17 @@ class Settings(BaseSettings):
 
     allowed_origins: list[str] = ["http://localhost:3000"]
     rate_limit_per_minute: int = 60
+    # Stricter limit for expensive write endpoints (создание проверок/поисков)
+    rate_limit_write_per_minute: int = 10
+
+    # Alice webhook: shared secret expected in the X-Alice-Secret header.
+    # Если пусто — webhook отключён (возвращает 503), чтобы публичная ручка
+    # не оставалась без какой-либо аутентификации.
+    alice_webhook_secret: str = ""
+    # Существующий служебный пользователь, от имени которого создаются проверки
+    # из навыка Алисы. Должен присутствовать в auth_db. Если пусто — создание
+    # проверок из Алисы отключено (возвращается голосовая подсказка).
+    alice_service_user_id: str = ""
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

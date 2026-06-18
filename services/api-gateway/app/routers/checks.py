@@ -7,6 +7,7 @@ from app.models import (
     CreateCheckRequest, CheckItemResponse, CheckStatusResponse,
     CheckReportResponse, ListChecksResponse,
 )
+from app.ratelimit import WRITE_LIMIT, limiter
 
 router = APIRouter()
 
@@ -36,8 +37,10 @@ def _check_item(r) -> CheckItemResponse:
     responses={
         400: {"description": "Не указан идентификатор участка"},
         202: {"description": "Задача принята в обработку"},
+        429: {"description": "Превышен лимит запросов"},
     },
 )
+@limiter.limit(WRITE_LIMIT)
 async def create_check(body: CreateCheckRequest, request: Request) -> CheckItemResponse:
     if not body.cadastral_number and not body.address and not (body.lat and body.lng):
         from fastapi import HTTPException

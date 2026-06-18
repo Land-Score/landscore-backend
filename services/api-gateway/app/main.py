@@ -7,14 +7,15 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.clients import setup_clients, close_clients
 from app.config import settings
 from app.middleware.auth import AuthMiddleware
 from app.models import HealthResponse, ServiceHealthItem
+from app.ratelimit import limiter
 from app.routers import alice, auth, cadastral, checks, searches, documents
 
 log = structlog.get_logger()
@@ -28,8 +29,6 @@ async def lifespan(app: FastAPI):
     await close_clients(app)
     log.info("gateway_stopped")
 
-
-limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
     title="LandScore AI — API Gateway",
@@ -82,10 +81,27 @@ Authorization: Bearer <access_token>
 )
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
+# default_limits на limiter применяются ко всем маршрутам через SlowAPIMiddleware;
+# write-ручки добавляют более строгий лимит через @limiter.limit на самом маршруте.
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
+# ── Middleware order ──────────────────────────────────────────────────────────
+# Starlette применяет middleware в обратном порядке добавления (последний добавленный
+# — самый внешний и срабатывает первым на входе / последним на выходе). Нужный порядок
+# снаружи внутрь: CORS → SlowAPI → Auth. Поэтому добавляем их в обратной
+# последовательности: сперва Auth, затем SlowAPI, и CORS — последним.
+#
+# CORS снаружи всего стека => его заголовки навешиваются даже на ранние ответы
+# Auth (401/503) и SlowAPI (429), и браузер видит реальный статус, а не CORS-ошибку.
+
+# Auth — самый внутренний прикладной middleware.
+app.add_middleware(AuthMiddleware)
+
+# SlowAPI enforce-middleware: применяет default_limits и per-route лимиты.
+app.add_middleware(SlowAPIMiddleware)
+
+# CORS — самый внешний, чтобы оборачивать ответы всех middleware ниже.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
@@ -93,9 +109,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ── Auth middleware ───────────────────────────────────────────────────────────
-app.add_middleware(AuthMiddleware)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth.router,      prefix="/api/auth",      tags=["Аутентификация"])

@@ -7,12 +7,41 @@ from app.models import DocumentUploadResponse, DocumentResponse
 router = APIRouter()
 
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_UPLOAD_CHUNK_BYTES = 1024 * 1024  # читаем тело потоково по 1 МБ
 _ALLOWED_CONTENT_TYPES = {
     "application/pdf",
     "image/jpeg",
     "image/png",
     "image/tiff",
 }
+
+
+async def _read_capped(file: UploadFile, request: Request) -> bytes:
+    """Читает тело файла потоково, прерываясь, как только превышен лимит.
+
+    Проверяет заголовок Content-Length до буферизации, затем дочитывает чанками
+    и обрывает чтение при превышении лимита — чтобы не буферизовать гигантское
+    тело в памяти (защита от DoS через загрузку).
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > _MAX_UPLOAD_BYTES:
+                raise HTTPException(413, detail="Файл превышает лимит 50 МБ")
+        except ValueError:
+            pass  # некорректный заголовок — положимся на проверку по чанкам
+
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_UPLOAD_BYTES:
+            raise HTTPException(413, detail="Файл превышает лимит 50 МБ")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @router.post(
@@ -41,9 +70,7 @@ async def upload_document(
                    f"Допустимые: {', '.join(sorted(_ALLOWED_CONTENT_TYPES))}",
         )
 
-    content = await file.read()
-    if len(content) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(413, detail="Файл превышает лимит 50 МБ")
+    content = await _read_capped(file, request)
 
     import document_pb2
     stub = request.app.state.document_stub
@@ -78,14 +105,20 @@ async def get_document(document_id: str, request: Request) -> DocumentResponse:
         resp = await stub.GetDocument(document_pb2.GetDocumentRequest(
             document_id=document_id,
         ))
-        return DocumentResponse(
-            document_id=resp.document_id,
-            filename=resp.filename,
-            size_bytes=resp.size_bytes,
-            download_url=resp.download_url,
-        )
     except grpc.RpcError as e:
         raise_for_grpc(e)
+
+    # Проверка владения: чужой документ выглядит как несуществующий (404),
+    # чтобы не раскрывать факт его существования другому пользователю.
+    if resp.user_id != request.state.user_id:
+        raise HTTPException(404, detail="Документ не найден")
+
+    return DocumentResponse(
+        document_id=resp.document_id,
+        filename=resp.filename,
+        size_bytes=resp.size_bytes,
+        download_url=resp.download_url,
+    )
 
 
 @router.delete(
@@ -100,6 +133,19 @@ async def get_document(document_id: str, request: Request) -> DocumentResponse:
 async def delete_document(document_id: str, request: Request):
     import document_pb2
     stub = request.app.state.document_stub
+
+    # Сначала проверяем владение — иначе любой пользователь мог бы удалить
+    # чужой документ. Чужой/несуществующий документ -> 404.
+    try:
+        doc = await stub.GetDocument(document_pb2.GetDocumentRequest(
+            document_id=document_id,
+        ))
+    except grpc.RpcError as e:
+        raise_for_grpc(e)
+
+    if doc.user_id != request.state.user_id:
+        raise HTTPException(404, detail="Документ не найден")
+
     try:
         await stub.DeleteDocument(document_pb2.DeleteDocumentRequest(
             document_id=document_id,

@@ -1,10 +1,12 @@
+import hmac
 import json
 import re
-import uuid
 from typing import Any
 
 import grpc
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+
+from app.config import settings
 
 router = APIRouter()
 
@@ -12,6 +14,27 @@ _CADASTRAL_RE = re.compile(r"\b\d{2}:\d{2}:\d{5,7}:\d+\b")
 _UUID_RE = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
+
+# Заголовок с общим секретом, которым Яндекс.Диалоги подписывают вебхук.
+_ALICE_SECRET_HEADER = "X-Alice-Secret"
+
+
+def _verify_alice_secret(request: Request) -> None:
+    """Базовая защита публичного вебхука общим секретом.
+
+    Вебхук открыт без JWT, поэтому требуем совпадения заголовка с секретом из
+    конфигурации. Если секрет не задан — ручка отключена целиком (503), чтобы
+    публичный эндпоинт не оставался вообще без аутентификации.
+    """
+    secret = settings.alice_webhook_secret
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Alice webhook is disabled: ALICE_WEBHOOK_SECRET is not configured",
+        )
+    provided = request.headers.get(_ALICE_SECRET_HEADER, "")
+    if not hmac.compare_digest(provided, secret):
+        raise HTTPException(status_code=403, detail="Invalid Alice webhook secret")
 
 
 def _alice_response(body: dict[str, Any], text: str, end_session: bool = False) -> dict[str, Any]:
@@ -29,14 +52,6 @@ def _alice_response(body: dict[str, Any], text: str, end_session: bool = False) 
 def _command(body: dict[str, Any]) -> str:
     request = body.get("request") or {}
     return (request.get("original_utterance") or request.get("command") or "").strip()
-
-
-def _alice_user_uuid(body: dict[str, Any]) -> str:
-    session = body.get("session") or {}
-    user = session.get("user") or {}
-    application = session.get("application") or {}
-    source_id = user.get("user_id") or application.get("application_id") or session.get("session_id") or "anonymous"
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"landscore-alice:{source_id}"))
 
 
 def _short_report(report_json: str) -> str:
@@ -58,6 +73,8 @@ def _short_report(report_json: str) -> str:
 @router.post("/webhook", summary="Webhook для навыка Яндекс Алисы")
 async def alice_webhook(body: dict[str, Any], request: Request) -> dict[str, Any]:
     import check_pb2
+
+    _verify_alice_secret(request)
 
     command = _command(body).lower()
     if body.get("session", {}).get("new") and not command:
@@ -101,10 +118,20 @@ async def alice_webhook(body: dict[str, Any], request: Request) -> dict[str, Any
     cadastral_match = _CADASTRAL_RE.search(command)
     if cadastral_match:
         cadastral_number = cadastral_match.group(0)
+        # Не создаём проверки под несуществующим пользователем. Из Алисы они
+        # создаются от имени реального служебного пользователя из auth_db.
+        # Если он не настроен — отвечаем подсказкой, но проверку не запускаем.
+        service_user_id = settings.alice_service_user_id
+        if not service_user_id:
+            return _alice_response(
+                body,
+                "Голосовой запуск проверок временно недоступен. "
+                "Запустите проверку участка в приложении LandScore.",
+            )
         try:
             created = await request.app.state.check_stub.CreateCheck(
                 check_pb2.CreateCheckRequest(
-                    user_id=_alice_user_uuid(body),
+                    user_id=service_user_id,
                     cadastral_number=cadastral_number,
                     purpose="Запрос из навыка Алисы",
                     user_profile_json=json.dumps(

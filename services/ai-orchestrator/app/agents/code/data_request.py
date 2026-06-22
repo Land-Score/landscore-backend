@@ -96,6 +96,32 @@ class DataRequestAgent(Agent):
             except Exception as exc:
                 warnings.append(f"plot_dataset_collection_failed:{exc}")
 
+        # Official ЕГРН (rights/encumbrances) via the paid aggregator. Merged into
+        # plot.egrn_data so Legal/CriticalRisk agents see real ипотека/аресты.
+        egrn_summary: dict[str, Any] = {}
+        if cadastral_number:
+            try:
+                egrn = await client.get_egrn(cadastral_number)
+                encumbrances = [str(e) for e in (egrn.get("encumbrances") or []) if e]
+                owner = egrn.get("owner") or ""
+                if encumbrances or owner or egrn.get("registration_date"):
+                    merged = dict(ctx.plot.egrn_data or {})
+                    merged.update({
+                        "encumbrances": encumbrances,
+                        "owner": owner,
+                        "registration_date": egrn.get("registration_date") or "",
+                        "egrn_source": "egrn_official",
+                    })
+                    ctx.plot.egrn_data = merged
+                egrn_summary = {
+                    "encumbrances": encumbrances,
+                    "owner": owner,
+                    "registration_date": egrn.get("registration_date") or "",
+                }
+                ctx.set("egrn", egrn)
+            except Exception as exc:
+                warnings.append(f"egrn_lookup_failed:{exc}")
+
         if not _valid_geometry(parcel_geometry_geojson):
             geometry = _first_feature_geometry(_json_dict(nspd.get("raw_json")))
             if geometry:
@@ -115,6 +141,7 @@ class DataRequestAgent(Agent):
                 data={
                     "dataset_available": bool(dataset),
                     "nspd": nspd,
+                    "egrn": egrn_summary,
                     "spatial_layers_available": False,
                     "warnings": warnings,
                 },
@@ -127,6 +154,8 @@ class DataRequestAgent(Agent):
             data={
                 "dataset_available": bool(dataset),
                 "nspd": nspd,
+                "egrn": egrn_summary,
+                "egrn_encumbrances_count": len(egrn_summary.get("encumbrances") or []),
                 "spatial_layers_available": True,
                 "restriction_layers_count": len(spatial_layers.get("restriction_layers", [])),
                 "land_use_layers_count": len(spatial_layers.get("land_use_layers", [])),

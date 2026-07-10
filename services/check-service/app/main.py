@@ -40,7 +40,7 @@ async def serve() -> None:
         options=GRPC_MESSAGE_OPTIONS,
     )
     check_pb2_grpc.add_CheckServiceServicer_to_server(CheckServicer(), server)
-    server.add_insecure_port(f"0.0.0.0:{settings.grpc_port}")
+    server.add_insecure_port(f"[::]:{settings.grpc_port}")
     log.info("check_service_starting", port=settings.grpc_port)
     await server.start()
     await server.wait_for_termination()

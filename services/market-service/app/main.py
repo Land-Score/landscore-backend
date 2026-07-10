@@ -50,7 +50,7 @@ async def serve() -> None:
         market_pb2_grpc.add_MarketServiceServicer_to_server(MarketServicer(), server)
     else:
         print("market-service warning: generated proto stubs not found; service starts without registered RPC handlers")
-    server.add_insecure_port("0.0.0.0:50058")
+    server.add_insecure_port("[::]:50058")
     print("market-service listening on :50058")
     await server.start()
     # Bootstrap ClickHouse (schema + seed) in the background so we accept the

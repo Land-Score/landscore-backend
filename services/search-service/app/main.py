@@ -31,7 +31,7 @@ async def serve() -> None:
     await init_db()
     server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
     search_pb2_grpc.add_SearchServiceServicer_to_server(SearchServicer(), server)
-    server.add_insecure_port(f"0.0.0.0:{settings.grpc_port}")
+    server.add_insecure_port(f"[::]:{settings.grpc_port}")
     log.info("search_service_starting", port=settings.grpc_port)
     await server.start()
     await server.wait_for_termination()

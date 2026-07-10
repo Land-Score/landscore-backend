@@ -21,7 +21,7 @@ log = structlog.get_logger()
 async def serve() -> None:
     server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
     auth_pb2_grpc.add_AuthServiceServicer_to_server(AuthServicer(), server)
-    server.add_insecure_port(f"0.0.0.0:{settings.grpc_port}")
+    server.add_insecure_port(f"[::]:{settings.grpc_port}")
     log.info("auth_service_starting", port=settings.grpc_port)
     await server.start()
     await server.wait_for_termination()

@@ -31,7 +31,7 @@ async def serve() -> None:
         document_pb2_grpc.add_DocumentServiceServicer_to_server(DocumentServicer(), server)
     else:
         print("document-service warning: generated proto stubs not found; service starts without registered RPC handlers")
-    server.add_insecure_port("0.0.0.0:50054")
+    server.add_insecure_port("[::]:50054")
     print("document-service listening on :50054")
     await server.start()
     await server.wait_for_termination()

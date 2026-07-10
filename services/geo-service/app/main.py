@@ -34,7 +34,7 @@ async def serve() -> None:
         options=GRPC_MESSAGE_OPTIONS,
     )
     geo_pb2_grpc.add_GeoServiceServicer_to_server(GeoServicer(), server)
-    server.add_insecure_port("0.0.0.0:50057")
+    server.add_insecure_port("[::]:50057")
     print("geo-service listening on :50057")
     await server.start()
     await server.wait_for_termination()

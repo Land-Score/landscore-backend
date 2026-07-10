@@ -30,7 +30,7 @@ async def serve() -> None:
         data_collector_pb2_grpc.add_DataCollectorServiceServicer_to_server(DataCollectorServicer(), server)
     else:
         print("data-collector warning: generated proto stubs not found; service starts without registered RPC handlers")
-    server.add_insecure_port("0.0.0.0:50056")
+    server.add_insecure_port("[::]:50056")
     print("data-collector listening on :50056")
     await server.start()
     await server.wait_for_termination()

@@ -54,6 +54,10 @@ def _compact_layer_for_client(layer: Any) -> dict[str, Any] | None:
         "counted_in_loss_ha",
         "area_loss_mode",
         "severity",
+        "properties_json",
+        "restrictions",
+        "normative_basis",
+        "confidence",
     ):
         value = layer.get(key)
         if value not in (None, "", [], {}):
@@ -77,7 +81,7 @@ def _compact_report_for_client(report_json: dict[str, Any] | None) -> dict[str, 
 
     land_parts = spatial.get("land_parts")
     land_parts_count = len(land_parts) if isinstance(land_parts, list) else 0
-    land_parts_limit = 80
+    land_parts_limit = 500
 
     compact: dict[str, Any] = {
         key: report.get(key)
@@ -96,6 +100,13 @@ def _compact_report_for_client(report_json: dict[str, Any] | None) -> dict[str, 
             "report",
             "client_explanation",
             "next_steps",
+            # --- Promoted structured data (pinned report_json contract) ---
+            "scenario_ranking",
+            "scenario_economics",
+            "legal",
+            "land_use",
+            "restrictions",
+            "score_breakdown",
         )
         if key in report
     }
@@ -104,6 +115,8 @@ def _compact_report_for_client(report_json: dict[str, Any] | None) -> dict[str, 
         "parcel_geometry_geojson": spatial.get("parcel_geometry_geojson") or "{}",
         "restriction_layers": _compact_layers_for_client(spatial.get("restriction_layers")),
         "land_use_layers": _compact_layers_for_client(spatial.get("land_use_layers")),
+        "valuation_layers": _compact_layers_for_client(spatial.get("valuation_layers")),
+        "informational_layers": _compact_layers_for_client(spatial.get("informational_layers")),
         "real_estate_objects": _compact_layers_for_client(spatial.get("real_estate_objects")),
         "child_real_estate_objects": _compact_layers_for_client(spatial.get("child_real_estate_objects")),
         "land_parts": _compact_layers_for_client(land_parts, limit=land_parts_limit),

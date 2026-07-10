@@ -3,6 +3,16 @@ from app.agents.llm.base_llm import BaseLLMAgent
 from app.agents.llm.report_context import build_report_context
 from app.pipeline.context import AgentContext
 
+_SCORE_CATEGORY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "weight": {"type": "number"},
+        "contribution": {"type": "number"},
+    },
+    "required": ["score", "weight"],
+}
+
 DECISION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -13,6 +23,18 @@ DECISION_SCHEMA = {
         "best_scenario": {"type": "string", "maxLength": 50},
         "stop_factors_active": {"type": "boolean"},
         "key_findings": {"type": "array", "items": {"type": "string"}},
+        "score_breakdown": {
+            "type": "object",
+            "properties": {
+                "legal": _SCORE_CATEGORY_SCHEMA,
+                "vri_fit": _SCORE_CATEGORY_SCHEMA,
+                "market": _SCORE_CATEGORY_SCHEMA,
+                "infrastructure": _SCORE_CATEGORY_SCHEMA,
+                "location_eco": _SCORE_CATEGORY_SCHEMA,
+                "data_quality_penalty": {"type": "integer"},
+                "stop_factor_override": {"type": "boolean"},
+            },
+        },
     },
     "required": ["overall_score", "recommendation", "verdict", "legal_risk", "best_scenario"],
 }

@@ -181,6 +181,231 @@ async def _update_check_progress(
     )
 
 
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _build_legal(ctx: AgentContext) -> dict[str, Any]:
+    """Surface the LegalAgent output in the pinned contract shape.
+
+    Defensive: the agent may have failed (ctx.get returns None) — degrade to an
+    empty-but-valid object so the frontend always has the keys.
+    """
+    legal = _as_dict(ctx.get("LegalAgent"))
+    return {
+        "risk_level": legal.get("risk_level"),
+        "ownership_confirmed": bool(legal.get("ownership_confirmed")),
+        "risks": [r for r in (legal.get("risks") or []) if isinstance(r, dict)],
+        "encumbrances": legal.get("encumbrances") or [],
+        "summary": legal.get("summary"),
+    }
+
+
+def _build_land_use(ctx: AgentContext) -> dict[str, Any]:
+    land_use = _as_dict(ctx.get("LandUseAgent"))
+    return {
+        "category": land_use.get("category"),
+        # LandUseAgent emits `allowed_use`; the contract names this `main_vri`.
+        "main_vri": land_use.get("main_vri") or land_use.get("allowed_use"),
+        "permitted_activities": land_use.get("permitted_activities") or [],
+        "conditionally_permitted": land_use.get("conditionally_permitted") or [],
+        "purpose_conformance": land_use.get("purpose_conformance"),
+        "change_possibility": land_use.get("change_possibility"),
+        "risks": [r for r in (land_use.get("risks") or []) if isinstance(r, dict)],
+        "summary": land_use.get("summary"),
+    }
+
+
+def _build_restrictions(ctx: AgentContext) -> list[dict[str, Any]]:
+    restrictions = _as_dict(ctx.get("RestrictionsAgent"))
+    items = restrictions.get("restrictions") or []
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        out.append({
+            "type": item.get("type"),
+            "name": item.get("name"),
+            "what_is_limited": item.get("what_is_limited"),
+            "normative_basis": item.get("normative_basis"),
+            "impact": item.get("impact"),
+            "severity": item.get("severity"),
+            "is_stop_factor": bool(item.get("is_stop_factor")),
+        })
+    return out
+
+
+def _build_scenario_ranking(ctx: AgentContext) -> list[dict[str, Any]]:
+    ranking = _as_dict(ctx.get("ScenarioRankingAgent")) or _as_dict(ctx.get("scenario_ranking"))
+    ranked = ranking.get("ranked_scenarios") or []
+    out: list[dict[str, Any]] = []
+    for item in ranked:
+        if not isinstance(item, dict):
+            continue
+        out.append({
+            "scenario": item.get("scenario"),
+            "applicable": bool(item.get("applicable")),
+            "roi_pct": item.get("roi_pct"),
+            "margin_pct": item.get("margin_pct"),
+            "payback_years": item.get("payback_years"),
+            "score": item.get("score"),
+            "rank": item.get("rank"),
+        })
+    return out
+
+
+def _build_scenario_economics(ctx: AgentContext) -> list[dict[str, Any]]:
+    profitability = _as_dict(ctx.get("ProfitabilityCalculatorAgent"))
+    scenarios = profitability.get("scenarios") or _as_dict(ctx.get("scenario_profitability"))
+    if not isinstance(scenarios, dict):
+        return []
+    out: list[dict[str, Any]] = []
+    for scenario, econ in scenarios.items():
+        if not isinstance(econ, dict):
+            continue
+        out.append({
+            "scenario": scenario,
+            "investment": econ.get("investment"),
+            "revenue": econ.get("revenue"),
+            "profit": econ.get("profit"),
+            "annual_profit": econ.get("annual_profit"),
+        })
+    return out
+
+
+_SCORE_WEIGHTS = {
+    "legal": 0.30,
+    "vri_fit": 0.20,
+    "market": 0.20,
+    "infrastructure": 0.15,
+    "location_eco": 0.15,
+}
+
+_SCORE_LABELS = {
+    "legal": "Правовая чистота",
+    "vri_fit": "Соответствие ВРИ",
+    "market": "Рыночный потенциал",
+    "infrastructure": "Инфраструктура",
+    "location_eco": "Локация и экология",
+}
+
+_LEGAL_RISK_SCORE = {"low": 90, "medium": 65, "high": 35, "critical": 10}
+
+
+def _fallback_category_scores(ctx: AgentContext, decision: dict[str, Any]) -> dict[str, int]:
+    """Compute sensible per-category 0..100 scores from the structured agent
+    outputs when the LLM omits score_breakdown.
+
+    legal      <- legal_risk level
+    market     <- price_deviation (closer to market = better)
+    infra      <- accessibility_score
+    vri_fit    <- map loss_percent + purpose conformance
+    """
+    legal_risk = str(
+        decision.get("legal_risk")
+        or _as_dict(ctx.get("LegalAgent")).get("risk_level")
+        or ""
+    ).lower()
+    legal_score = _LEGAL_RISK_SCORE.get(legal_risk, 50)
+
+    market = _as_dict(ctx.get("market_summary"))
+    deviation = market.get("price_deviation_pct")
+    try:
+        market_score = max(0, min(100, int(100 - abs(float(deviation)) * 1.5))) if deviation is not None else 50
+    except (TypeError, ValueError):
+        market_score = 50
+
+    infra = _as_dict(ctx.get("infrastructure_summary"))
+    try:
+        infra_score = max(0, min(100, int(float(infra.get("accessibility_score") or 50))))
+    except (TypeError, ValueError):
+        infra_score = 50
+
+    map_summary = _as_dict(ctx.get("map_summary"))
+    loss = map_summary.get("loss_percent")
+    try:
+        vri_score = max(0, min(100, int(100 - float(loss)))) if loss is not None else 60
+    except (TypeError, ValueError):
+        vri_score = 60
+    conformance = str(_as_dict(ctx.get("LandUseAgent")).get("purpose_conformance") or "").lower()
+    if conformance == "not_permitted":
+        vri_score = min(vri_score, 20)
+    elif conformance == "requires_change":
+        vri_score = min(vri_score, 55)
+
+    return {
+        "legal": legal_score,
+        "vri_fit": vri_score,
+        "market": market_score,
+        "infrastructure": infra_score,
+        # No dedicated eco agent; anchor on infra/locality as a proxy.
+        "location_eco": infra_score,
+    }
+
+
+def _build_score_breakdown(ctx: AgentContext, decision: dict[str, Any], critical: dict[str, Any]) -> dict[str, Any]:
+    """Assemble score_breakdown. Prefer the LLM's per-category scores; fall back
+    to computed scores. Always returns the full contract shape."""
+    llm_breakdown = _as_dict(decision.get("score_breakdown"))
+    fallback = _fallback_category_scores(ctx, decision)
+
+    categories: list[dict[str, Any]] = []
+    for key, weight in _SCORE_WEIGHTS.items():
+        cat = _as_dict(llm_breakdown.get(key))
+        try:
+            score = int(float(cat.get("score")))
+            score = max(0, min(100, score))
+        except (TypeError, ValueError):
+            score = fallback[key]
+        contribution = cat.get("contribution")
+        if not isinstance(contribution, (int, float)):
+            contribution = round(score * weight, 1)
+        categories.append({
+            "key": key,
+            "label": _SCORE_LABELS[key],
+            "score": score,
+            "weight": weight,
+            "contribution": contribution,
+        })
+
+    try:
+        penalty = int(float(llm_breakdown.get("data_quality_penalty")))
+    except (TypeError, ValueError):
+        penalty = 0
+
+    stop_override = llm_breakdown.get("stop_factor_override")
+    if not isinstance(stop_override, bool):
+        stop_override = bool(critical.get("stop_has_critical")) or bool(decision.get("stop_factors_active"))
+
+    overall = _safe_score(decision.get("overall_score"))
+    return {
+        "overall": overall,
+        "categories": categories,
+        "data_quality_penalty": penalty,
+        "stop_factor_override": stop_override,
+    }
+
+
+def _build_structured_next_steps(next_steps: Any) -> dict[str, Any]:
+    """Un-flatten NextStepsAgent output into {steps:[{title,action,reason,priority}]}."""
+    data = _as_dict(next_steps)
+    steps_raw = data.get("steps")
+    if not isinstance(steps_raw, list):
+        steps_raw = []
+    steps: list[dict[str, Any]] = []
+    for item in steps_raw:
+        if isinstance(item, dict):
+            steps.append({
+                "title": item.get("title"),
+                "action": item.get("action"),
+                "reason": item.get("reason"),
+                "priority": item.get("priority"),
+            })
+        elif isinstance(item, str) and item.strip():
+            steps.append({"title": item.strip(), "action": item.strip(), "reason": None, "priority": None})
+    return {"steps": steps}
+
+
 async def _save_check_result(check_id: str, ctx: AgentContext, results: dict[str, AgentResult]) -> None:
     agents = {name: _result_to_dict(result) for name, result in results.items()}
     decision = ctx.get("ChiefDecisionAgent") or {}
@@ -203,7 +428,16 @@ async def _save_check_result(check_id: str, ctx: AgentContext, results: dict[str
         "critical_risk": critical,
         "report": report,
         "client_explanation": explanation,
-        "next_steps": next_steps,
+        # next_steps stays the raw agent dict for backward-compat; the structured
+        # contract version is promoted to its own top-level key below.
+        "next_steps": _build_structured_next_steps(next_steps),
+        # --- Promoted structured data (pinned report_json contract) ---
+        "scenario_ranking": _build_scenario_ranking(ctx),
+        "scenario_economics": _build_scenario_economics(ctx),
+        "legal": _build_legal(ctx),
+        "land_use": _build_land_use(ctx),
+        "restrictions": _build_restrictions(ctx),
+        "score_breakdown": _build_score_breakdown(ctx, decision, critical),
         "agents": agents,
     }
     await _check_stub_call(

@@ -18,6 +18,7 @@ from app.mock_data import build_plot_payload as mock_build_plot_payload
 from app.mock_data import stable_hash as mock_stable_hash
 from app.rosreestr_client import PlotData, egrn_to_dict, get_client, plot_to_dict
 from app.layers.normalizer import normalize_feature
+from app.sources import torgi_land_search
 from app.sources.egrn_official import EGRNOfficialClient
 from app.sources.nspd_map_layers import NspdChildObjectClient, NspdMapLayerClient, parcel_geometry_from_plot_raw
 from app.spatial_collector import SpatialLayerCollector, collected_spatial_data_to_dict
@@ -402,14 +403,48 @@ class DataCollectorServicer:
 
     async def SearchPlots(self, request, context):
         if settings.rosreestr_mode.lower() == "real":
-            _set_unimplemented(context, "Search requires a persisted search index")
-            return _message_or_dict("SearchPlotsResponse", {"plots": [], "total": 0})
+            plots = await self._real_search_plots(request)
+            return _message_or_dict(
+                "SearchPlotsResponse",
+                {"plots": plots, "total": len(plots)},
+            )
 
         plots = _mock_search_plots(request)
         return _message_or_dict(
             "SearchPlotsResponse",
             {"plots": plots, "total": len(plots)},
         )
+
+    async def _real_search_plots(self, request: Any) -> list[dict[str, Any]]:
+        """Real-mode candidate search via torgi.gov.ru land lots.
+
+        Soft-degrades to an empty shortlist on any error so the search pipeline
+        keeps running; the caller treats [] as "no live candidates".
+        """
+
+        try:
+            lots = await torgi_land_search.search_land_lots(
+                region=str(getattr(request, "region", "") or ""),
+                category=str(getattr(request, "category", "") or ""),
+                allowed_use=str(getattr(request, "allowed_use", "") or ""),
+                area_min=float(getattr(request, "area_min", 0) or 0),
+                area_max=float(getattr(request, "area_max", 0) or 0),
+                price_min=float(getattr(request, "price_min", 0) or 0),
+                price_max=float(getattr(request, "price_max", 0) or 0),
+                limit=int(getattr(request, "limit", 0) or 0),
+            )
+        except Exception:  # never break the RPC on a source failure
+            return []
+
+        plots: list[dict[str, Any]] = []
+        for lot in lots:
+            if not isinstance(lot, dict):
+                continue
+            data = dict(lot)
+            # PlotDataResponse.raw_json is a string field; torgi source returns a dict.
+            data["raw_json"] = json.dumps(data.get("raw_json") or {}, ensure_ascii=False)
+            plots.append(data)
+        return plots
 
     async def CollectPlotSpatialLayers(self, request, context):
         """Collect and normalize NSPD map layers intersecting a cadastral parcel."""

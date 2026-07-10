@@ -23,6 +23,18 @@ def _first(criteria: dict, *keys: str) -> Any:
     return None
 
 
+def _allowed_use_str(value: Any) -> str:
+    """Criteria may carry allowed_use as a string or a list of strings
+    (the frontend criteria-view emits an array). Flatten to a single
+    comma-joined string for the data-collector contract / matching."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return ", ".join(parts)
+    return str(value).strip()
+
+
 class LandScoutAgent(Agent):
     """Чисто вычислительный агент — без LLM.
 
@@ -39,9 +51,9 @@ class LandScoutAgent(Agent):
 
         region = str(_first(criteria, "region") or ctx.profile.region or "")
         category = str(_first(criteria, "category") or "")
-        allowed_use = str(_first(criteria, "allowed_use", "vri") or "")
-        area_min = _to_float(_first(criteria, "area_min", "min_area"))
-        area_max = _to_float(_first(criteria, "area_max", "max_area"))
+        allowed_use = _allowed_use_str(_first(criteria, "allowed_use", "vri"))
+        area_min = _to_float(_first(criteria, "area_min_ha", "area_min", "min_area"))
+        area_max = _to_float(_first(criteria, "area_max_ha", "area_max", "max_area"))
         price_min = _to_float(_first(criteria, "price_min", "min_price", "budget_min"))
         price_max = _to_float(_first(criteria, "price_max", "max_price", "budget_max", "budget"))
         limit = int(_to_float(_first(criteria, "limit"), 20))

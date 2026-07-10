@@ -41,8 +41,21 @@ class ShortlistRankingAgent(Agent):
         criteria = ctx.get("SearchCriteriaAgent") or {}
         if not isinstance(criteria, dict):
             criteria = {}
-        target_area = _to_float(_first(criteria, "target_area", "area"))
         price_max = _to_float(_first(criteria, "price_max", "max_price", "budget_max", "budget"))
+
+        # Candidate summary.area is in m²; criteria area bounds are in hectares.
+        # Prefer an explicit target; otherwise derive one from the area_min/max
+        # range (midpoint, or whichever bound is set), converting ha → m².
+        target_area = _to_float(_first(criteria, "target_area", "area"))
+        if not target_area:
+            area_min_ha = _to_float(_first(criteria, "area_min_ha", "area_min", "min_area"))
+            area_max_ha = _to_float(_first(criteria, "area_max_ha", "area_max", "max_area"))
+            if area_min_ha and area_max_ha:
+                target_area = (area_min_ha + area_max_ha) / 2 * 10_000.0
+            elif area_min_ha:
+                target_area = area_min_ha * 10_000.0
+            elif area_max_ha:
+                target_area = area_max_ha * 10_000.0
         priorities = [str(p).lower() for p in (ctx.profile.priority or [])]
 
         scored: list[dict] = []

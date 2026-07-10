@@ -45,8 +45,8 @@ class CandidateFilteringAgent(Agent):
         if not isinstance(criteria, dict):
             criteria = {}
 
-        area_min = _to_float(_first(criteria, "area_min", "min_area"))
-        area_max = _to_float(_first(criteria, "area_max", "max_area"))
+        area_min = _to_float(_first(criteria, "area_min_ha", "area_min", "min_area"))
+        area_max = _to_float(_first(criteria, "area_max_ha", "area_max", "max_area"))
         price_min = _to_float(_first(criteria, "price_min", "min_price", "budget_min"))
         price_max = _to_float(_first(criteria, "price_max", "max_price", "budget_max", "budget"))
         category = _norm(str(_first(criteria, "category") or ""))
@@ -61,10 +61,13 @@ class CandidateFilteringAgent(Agent):
             price = _to_float(summary.get("price"))
             cand_category = _norm(str(summary.get("category") or ""))
 
+            # Criteria area_min/max are in hectares; candidate area is in m².
+            area_ha = area / 10_000.0 if area else 0.0
+
             reasons: list[str] = []
-            if area_min and area and area < area_min:
+            if area_min and area_ha and area_ha < area_min:
                 reasons.append("площадь меньше минимальной")
-            if area_max and area and area > area_max:
+            if area_max and area_ha and area_ha > area_max:
                 reasons.append("площадь больше максимальной")
             if price_min and price and price < price_min:
                 reasons.append("цена ниже диапазона")
